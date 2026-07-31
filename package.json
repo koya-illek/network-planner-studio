@@ -1,0 +1,16 @@
+{
+  "name": "network-planner-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "test": "node --test",
+    "test:e2e": "playwright test",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "wrangler": "^4.114.0"
+  }
+}

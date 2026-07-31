@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Plan IPv4 networks, VLANs, sites and VPN connectivity with guided recommendations.">
+  <meta name="theme-color" content="#102820">
+  <meta property="og:title" content="Network Planner Studio">
+  <meta property="og:description" content="Map existing IPv4 ranges, plan sites and VLANs, validate capacity, and simulate routes on a live topology.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://network.illek.ie/">
+  <meta name="twitter:card" content="summary">
+  <link rel="canonical" href="https://network.illek.ie/">
+  <title>Network Planner Studio</title>
+  <link rel="icon" href="/favicon.svg">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" type="module"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to network planner</a>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Network Planner Studio home">
+      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span><strong>Network Planner</strong><small>Studio</small></span>
+    </a>
+    <div class="project-title">
+      <span class="eyebrow">Current design</span>
+      <button id="project-name-button" class="text-button" type="button">Untitled network</button>
+    </div>
+    <div class="top-actions">
+      <span class="save-state" id="save-state">Saved locally</span>
+      <button class="button home-button" id="home-button" type="button">Home</button>
+      <button class="button recommend-button" id="recommend-button" type="button">✦ Recommend</button>
+      <button class="button ghost" id="undo-button" type="button" disabled aria-label="Undo last change">Undo</button>
+      <button class="button ghost" id="redo-button" type="button" disabled aria-label="Redo last change">Redo</button>
+      <button class="button ghost" id="import-button" type="button">Import</button>
+      <button class="button ghost" id="export-button" type="button">Export</button>
+      <button class="button ghost" id="projects-button" type="button">Projects</button>
+      <button class="button primary" id="add-site-top" type="button">+ Add site</button>
+    </div>
+  </header>
+
+  <main id="main-content">
+    <section id="welcome" class="welcome">
+      <div class="welcome-copy">
+        <span class="kicker">IPv4 network design, made visible</span>
+        <h1>Start with what exists.<br>Design what comes next.</h1>
+        <p>Map offices, VLANs and WAN connections. Network Planner checks capacity, overlap and routing assumptions as the design grows.</p>
+        <div class="welcome-actions">
+          <button class="button primary large" data-start="existing" type="button">Map an existing network</button>
+          <button class="button secondary large" data-start="new" type="button">Plan a new network</button>
+          <button class="button ghost large hidden" id="continue-design" type="button">Continue current design</button>
+          <button class="button ghost large" id="welcome-projects" type="button">Open saved designs</button>
+        </div>
+        <button class="sample-link" data-start="sample" type="button">Or explore a complete example →</button>
+      </div>
+      <div class="welcome-visual" aria-hidden="true">
+        <div class="map-grid"></div>
+        <div class="mini-node node-a"><span>HQ</span><small>4 VLANs</small></div>
+        <div class="mini-node node-b"><span>Branch</span><small>3 VLANs</small></div>
+        <div class="mini-node node-c"><span>Cloud</span><small>2 networks</small></div>
+        <svg viewBox="0 0 600 420"><path d="M170 120 C260 90 340 125 430 175"/><path d="M170 120 C210 230 290 310 390 330"/><path d="M430 175 C460 245 440 285 390 330"/></svg>
+      </div>
+    </section>
+
+    <section id="workspace" class="workspace hidden">
+      <nav class="view-tabs" aria-label="Planner views">
+        <button class="active" data-view="topology" type="button">Topology</button>
+        <button data-view="addressing" type="button">Address plan</button>
+        <button data-view="review" type="button">Design review <span id="issue-count" class="count">0</span></button>
+        <button data-view="policy" type="button">Traffic policy</button>
+        <button data-view="report" type="button">Implementation report</button>
+      </nav>
+
+      <div id="topology-view" class="view active">
+        <aside class="tool-panel">
+          <div class="panel-heading">
+            <div><span class="eyebrow">Environment</span><h2>Sites & networks</h2></div>
+            <button class="icon-button" id="add-site-side" type="button" aria-label="Add site" title="Add site">+</button>
+          </div>
+          <div id="site-list" class="site-list"></div>
+          <div class="panel-help">
+            <strong>Design guidance</strong>
+            <p id="guidance-summary">Add a site to begin building the address hierarchy.</p>
+          </div>
+        </aside>
+
+        <section class="canvas-shell">
+          <div class="canvas-toolbar">
+            <div class="mode-group">
+              <button id="mobile-sites-button" class="mobile-only" type="button">Sites</button>
+              <button class="active" data-tool="select" type="button">Select</button>
+              <button data-tool="connect" type="button">Connect sites</button>
+              <button data-tool="trace" type="button">Trace path</button>
+              <button id="hub-spoke-button" type="button">Hub & spoke</button>
+            </div>
+            <div class="canvas-meta"><span id="topology-mode">Custom</span><span id="site-total">0 sites</span><span id="vlan-total">0 VLANs</span><span id="address-total">0 addresses</span></div>
+            <div class="zoom-controls"><button id="zoom-out" type="button" aria-label="Zoom out">−</button><button id="zoom-fit" type="button">Fit</button><button id="zoom-in" type="button" aria-label="Zoom in">+</button></div>
+          </div>
+          <div id="canvas" class="canvas" tabindex="0" aria-label="Network topology canvas">
+            <div class="canvas-grid"></div>
+            <svg id="link-layer" class="link-layer"></svg>
+            <div id="node-layer" class="node-layer"></div>
+            <div id="empty-canvas" class="empty-canvas">
+              <span class="empty-icon">⌁</span>
+              <h3>Your topology will appear here</h3>
+              <p>Add the first office, data centre or cloud network.</p>
+              <button class="button primary" id="empty-add-site" type="button">Add first site</button>
+            </div>
+          </div>
+          <div id="trace-bar" class="trace-bar hidden">
+            <div><span class="pulse-dot"></span><strong id="trace-title">Tracing path</strong><small id="trace-detail"></small></div>
+            <button class="icon-button" id="close-trace" type="button" aria-label="Close trace">×</button>
+          </div>
+        </section>
+
+        <aside id="inspector" class="inspector">
+          <div class="inspector-empty">
+            <span>↖</span>
+            <h3>Select something</h3>
+            <p>Choose a site, VLAN or connection to inspect and edit its design.</p>
+          </div>
+        </aside>
+      </div>
+
+      <div id="addressing-view" class="view">
+        <section class="page-view">
+          <div class="page-heading">
+            <div><span class="kicker">Address allocation</span><h1>IPv4 address plan</h1><p>A hierarchical view of every site and VLAN in the environment.</p></div>
+            <div><button class="button ghost" id="csv-export" type="button">Export CSV</button> <button class="button primary" id="add-vlan-address" type="button">+ Add VLAN</button></div>
+          </div>
+          <div id="address-summary" class="summary-grid"></div>
+          <div class="table-card">
+            <table>
+              <thead><tr><th>Site / network</th><th>VLAN</th><th>IPv4 prefix</th><th>Gateway</th><th>Needed</th><th>Usable</th><th>Headroom</th><th>Status</th></tr></thead>
+              <tbody id="address-table"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <div id="review-view" class="view">
+        <section class="page-view">
+          <div class="page-heading">
+            <div><span class="kicker">Continuous validation</span><h1>Design review</h1><p>Hard conflicts, capacity risks and best-practice opportunities.</p></div>
+            <button class="button secondary" id="rerun-review" type="button">Run review</button>
+          </div>
+          <div id="review-score" class="review-hero"></div>
+          <div id="review-list" class="review-list"></div>
+        </section>
+      </div>
+
+      <div id="policy-view" class="view">
+        <section class="page-view">
+          <div class="page-heading"><div><span class="kicker">Trust boundaries</span><h1>Traffic policy</h1><p>Define the intended relationship between VLAN roles. Click a cell to cycle allow, restricted and deny.</p></div></div>
+          <div id="flow-matrix" class="table-card flow-matrix"></div>
+        </section>
+      </div>
+
+      <div id="report-view" class="view">
+        <section class="page-view report-page">
+          <div class="page-heading no-print">
+            <div><span class="kicker">Design handoff</span><h1>Implementation report</h1><p>A print-ready summary of addressing, routing, resilience, policy and assumptions.</p></div>
+            <button class="button primary" id="print-report" type="button">Print / save PDF</button>
+          </div>
+          <div id="implementation-report"></div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="site-dialog">
+    <form method="dialog" id="site-form">
+      <div class="dialog-heading"><div><span class="eyebrow">Environment</span><h2 id="site-dialog-title">Add a site</h2><p>Give this location a parent address range. VLANs will be allocated inside it.</p></div><button class="dialog-close" type="button" data-close-dialog aria-label="Close">×</button></div>
+      <div class="form-grid">
+        <label class="wide">Site name<input name="name" required placeholder="e.g. Cork office"></label>
+        <label>Site type<select name="type"><option value="office">Office</option><option value="branch">Branch</option><option value="datacentre">Data centre</option><option value="cloud">Cloud</option><option value="warehouse">Warehouse</option></select></label>
+        <label>Estimated devices<input name="devices" type="number" min="1" max="50000" value="50"></label>
+        <label class="wide">Existing site range <span class="optional">(optional)</span><input name="cidr" placeholder="e.g. 10.20.0.0/16"><small>Leave blank and the planner will recommend a non-overlapping range.</small></label>
+        <label>Internet connection<select name="wan"><option value="single">Single WAN</option><option value="dual">Dual WAN</option><option value="none">No direct internet</option></select></label>
+        <label>Growth allowance<select name="growth"><option value="30">30% recommended</option><option value="20">20%</option><option value="50">50%</option><option value="0">No allowance</option></select></label>
+        <label>Topology role<select name="topologyRole"><option value="standalone">Standalone</option><option value="hub">Hub</option><option value="spoke">Spoke</option></select></label>
+        <label>Internet breakout<select name="internetBreakout"><option value="local">Local</option><option value="hub">Through hub</option><option value="none">None</option></select></label>
+        <label class="wide">Design notes<textarea name="notes" placeholder="Assumptions, ownership, constraints…"></textarea></label>
+      </div>
+      <div id="site-form-error" class="form-error"></div>
+      <div class="dialog-actions"><button class="button ghost" type="button" data-close-dialog>Cancel</button><button class="button primary" id="site-submit" type="submit">Add site</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="vlan-dialog">
+    <form method="dialog" id="vlan-form">
+      <div class="dialog-heading"><div><span class="eyebrow">Segmentation</span><h2 id="vlan-dialog-title">Add a VLAN</h2><p>Enter an existing subnet or let the planner allocate one inside the site range.</p></div><button class="dialog-close" type="button" data-close-dialog aria-label="Close">×</button></div>
+      <div class="form-grid">
+        <label class="wide">Site<select name="siteId" required></select></label>
+        <label>VLAN name<input name="name" required placeholder="e.g. Staff"></label>
+        <label>VLAN ID<input name="vid" type="number" min="1" max="4094" required value="10"></label>
+        <label>Purpose<select name="role"><option value="users">Staff / users</option><option value="voice">Voice</option><option value="guest">Guest Wi-Fi</option><option value="iot">IoT / CCTV</option><option value="servers">Servers</option><option value="management">Network management</option><option value="transit">Transit</option><option value="other">Other</option></select></label>
+        <label>Devices needed<input name="devices" type="number" min="1" max="65534" value="30" required></label>
+        <label class="wide">Existing IPv4 subnet <span class="optional">(optional)</span><input name="cidr" placeholder="e.g. 10.20.10.0/24"><small>Leave blank to receive the smallest recommended subnet with growth allowance.</small></label>
+        <label>DHCP<select name="dhcpEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
+        <label>Reserved addresses<input name="reserved" type="number" min="1" max="1000" value="1"><small>Gateway and other reservations, in addition to network and broadcast.</small></label>
+        <label>DHCP pool start <span class="optional">(optional)</span><input name="dhcpStart" placeholder="Automatically calculated"></label>
+        <label>DHCP pool end <span class="optional">(optional)</span><input name="dhcpEnd" placeholder="Automatically calculated"></label>
+        <label class="wide">Design notes<textarea name="notes" placeholder="DHCP exclusions, security zone, purpose…"></textarea></label>
+      </div>
+      <div id="vlan-form-error" class="form-error"></div>
+      <div class="dialog-actions"><button class="button ghost" type="button" data-close-dialog>Cancel</button><button class="button primary" id="vlan-submit" type="submit">Add VLAN</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="connect-dialog">
+    <form method="dialog" id="connect-form">
+      <div class="dialog-heading"><div><span class="eyebrow">Connectivity</span><h2>Connect sites</h2><p>Model the logical WAN path between two locations.</p></div><button class="dialog-close" type="button" data-close-dialog aria-label="Close">×</button></div>
+      <div class="form-grid">
+        <label>From<select name="from" required></select></label>
+        <label>To<select name="to" required></select></label>
+        <label>Connection<select name="type"><option value="vpn">Site-to-site VPN</option><option value="private">Private WAN</option><option value="peering">Cloud peering</option><option value="internet">Internet</option></select></label>
+        <label>Resilience<select name="resilience"><option value="single">Single path</option><option value="dual">Dual / redundant</option></select></label>
+        <label>Routing<select name="routingType"><option value="static">Static routes</option><option value="bgp">Dynamic / BGP</option></select></label>
+        <label>Transit<select name="transitAllowed"><option value="true">Allow transit</option><option value="false">Endpoint only</option></select></label>
+        <label class="wide check-label"><input name="defaultRoute" type="checkbox"> Advertise a default route over this connection</label>
+        <label class="wide">Advertised IPv4 prefixes<input name="advertisedPrefixes" placeholder="e.g. 10.20.0.0/16, 10.30.0.0/16"><small>Leave blank when routing is learned elsewhere or not yet defined.</small></label>
+      </div>
+      <div id="connect-form-error" class="form-error"></div>
+      <div class="dialog-actions"><button class="button ghost" type="button" data-close-dialog>Cancel</button><button class="button primary" id="connect-submit" type="submit">Create connection</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="name-dialog">
+    <form method="dialog" id="name-form">
+      <div class="dialog-heading"><div><span class="eyebrow">Project</span><h2>Name this design</h2></div><button class="dialog-close" type="button" data-close-dialog aria-label="Close">×</button></div>
+      <label>Project name<input name="name" required maxlength="80"></label>
+      <label>Design assumptions<textarea name="assumptions" placeholder="One assumption per line"></textarea></label>
+      <div class="dialog-actions"><button class="button ghost" type="button" data-close-dialog>Cancel</button><button class="button primary" type="submit">Save name</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="recommend-dialog" class="recommend-dialog">
+    <form id="recommend-form">
+      <div class="dialog-heading"><div><span class="eyebrow">Compatibility assistant</span><h2>Recommend a design</h2><p>The planner uses existing ranges, VLAN conventions and capacity to produce a compatible proposal.</p></div><button class="dialog-close" type="button" data-close-dialog aria-label="Close">×</button></div>
+      <div class="recommend-tabs">
+        <button class="active" type="button" data-recommend-kind="site">New site</button>
+        <button type="button" data-recommend-kind="vlan">New VLAN</button>
+      </div>
+      <input name="kind" value="site" type="hidden">
+      <div id="recommend-site-fields" class="form-grid">
+        <label class="wide">Site name<input name="siteName" placeholder="e.g. Limerick office" value="New office"></label>
+        <label>Site type<select name="siteType"><option value="office">Office</option><option value="branch">Branch</option><option value="warehouse">Warehouse</option><option value="datacentre">Data centre</option><option value="cloud">Cloud</option></select></label>
+        <label>People / primary devices<input name="siteDevices" type="number" min="1" max="5000" value="50"></label>
+        <label>Growth allowance<select name="siteGrowth"><option value="30">30% recommended</option><option value="20">20%</option><option value="50">50%</option></select></label>
+        <label>Connect to<select name="connectTo"><option value="">No VPN yet</option></select></label>
+      </div>
+      <div id="recommend-vlan-fields" class="form-grid hidden">
+        <label class="wide">Add to site<select name="vlanSite"></select></label>
+        <label>Purpose<select name="vlanRole"><option value="users">Staff / users</option><option value="voice">Voice</option><option value="guest">Guest Wi-Fi</option><option value="iot">IoT / CCTV</option><option value="servers">Servers</option><option value="management">Network management</option><option value="transit">Transit</option><option value="other">Other</option></select></label>
+        <label>Devices needed<input name="vlanDevices" type="number" min="1" max="65534" value="30"></label>
+        <label class="wide">VLAN name<input name="vlanName" placeholder="Suggested from purpose"></label>
+      </div>
+      <div id="recommend-preview" class="recommend-preview"></div>
+      <div id="recommend-error" class="form-error"></div>
+      <div class="dialog-actions"><button class="button ghost" type="button" data-close-dialog>Cancel</button><button class="button secondary" id="refresh-recommendation" type="button">Refresh proposal</button><button class="button primary" id="apply-recommendation" type="button">Apply recommendation</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="hub-dialog">
+    <form id="hub-form">
+      <div class="dialog-heading"><div><span class="eyebrow">Topology template</span><h2>Configure hub and spoke</h2><p>Assign a central transit hub, connect every spoke, and define how traffic is allowed to move.</p></div><button class="dialog-close" type="button" data-close-dialog aria-label="Close">×</button></div>
+      <div class="form-grid">
+        <label class="wide">Hub site<select name="hubId" required></select></label>
+        <label class="wide">Secondary hub <span class="optional">(optional)</span><select name="secondaryHubId"><option value="">No secondary hub</option></select></label>
+        <label>Spoke-to-spoke traffic<select name="spokeToSpoke"><option value="via-hub">Allowed through hub</option><option value="denied">Denied / isolated</option></select></label>
+        <label>Internet breakout<select name="internetBreakout"><option value="hub">Centralized at hub</option><option value="local">Local at each spoke</option><option value="none">No internet path</option></select></label>
+        <label class="wide check-label"><input name="centralizedInspection" type="checkbox" checked> Route inter-site traffic through centralized inspection</label>
+        <label class="wide check-label"><input name="createLinks" type="checkbox" checked> Create missing VPN links between the hub and every spoke</label>
+      </div>
+      <div id="hub-form-error" class="form-error"></div>
+      <div class="dialog-actions"><button class="button ghost" type="button" data-close-dialog>Cancel</button><button class="button primary" type="submit">Apply hub-and-spoke design</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="trace-dialog">
+    <form id="trace-form">
+      <div class="dialog-heading"><div><span class="eyebrow">Routing simulation</span><h2>Trace an end-to-end path</h2><p>Choose source and destination sites. The planner will follow every transit hop and apply the topology policy.</p></div><button class="dialog-close" type="button" data-close-dialog aria-label="Close">×</button></div>
+      <div class="form-grid"><label>Source site<select name="from" required></select></label><label>Destination site<select name="to" required></select></label></div>
+      <div id="trace-form-error" class="form-error"></div>
+      <div class="dialog-actions"><button class="button ghost" type="button" data-close-dialog>Cancel</button><button class="button primary" type="submit">Trace route</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="projects-dialog" class="projects-dialog">
+    <div class="dialog-heading"><div><span class="eyebrow">Local workspace</span><h2>Your designs</h2><p>Designs stay in this browser. Duplicate a design before exploring an alternative.</p></div><button class="dialog-close" type="button" data-close-dialog aria-label="Close">×</button></div>
+    <div id="project-list" class="project-list"></div>
+    <div class="dialog-actions"><button class="button secondary" id="duplicate-project" type="button">Duplicate current</button><button class="button primary" id="new-project" type="button">New design</button></div>
+  </dialog>
+
+  <input id="file-input" type="file" accept="application/json,text/csv,.json,.csv" hidden>
+  <footer class="app-footer">
+    © 2026 Illek. All rights reserved. Planning and diagnostic guidance only. <a href="https://tools.illek.ie/privacy">Privacy</a>
+  </footer>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
