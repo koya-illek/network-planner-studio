@@ -68,7 +68,8 @@ export function isPrivateCidr(cidr){
 export function shortestPath(sites,links,from,to,{topologyMode="custom",spokeToSpoke="via-hub"}={}){
   if(from===to)return{sites:[from],links:[]};
   const byId=new Map(sites.map(s=>[s.id,s]));
-  if(topologyMode==="hub-spoke"&&spokeToSpoke==="denied"&&byId.get(from)?.topologyRole==="spoke"&&byId.get(to)?.topologyRole==="spoke")return null;
+  const enforceHubSpoke=topologyMode==="hub-spoke"&&["denied","via-hub"].includes(spokeToSpoke);
+  if(enforceHubSpoke&&spokeToSpoke==="denied"&&byId.get(from)?.topologyRole==="spoke"&&byId.get(to)?.topologyRole==="spoke")return null;
   const queue=[{id:from,sitePath:[from],linkPath:[]}],seen=new Set([from]);
   while(queue.length){
     const current=queue.shift();
@@ -76,7 +77,7 @@ export function shortestPath(sites,links,from,to,{topologyMode="custom",spokeToS
       if(link.transitAllowed===false&&current.id!==from)continue;
       const next=link.from===current.id?link.to:link.from;if(seen.has(next)||!byId.has(next))continue;
       const a=byId.get(current.id),b=byId.get(next);
-      if(topologyMode==="hub-spoke"&&spokeToSpoke==="denied"&&a?.topologyRole==="spoke"&&b?.topologyRole==="spoke")continue;
+      if(enforceHubSpoke&&a?.topologyRole==="spoke"&&b?.topologyRole==="spoke")continue;
       const candidate={id:next,sitePath:[...current.sitePath,next],linkPath:[...current.linkPath,link.id]};
       if(next===to)return{sites:candidate.sitePath,links:candidate.linkPath};
       seen.add(next);queue.push(candidate);
@@ -86,12 +87,20 @@ export function shortestPath(sites,links,from,to,{topologyMode="custom",spokeToS
 }
 
 function safeIdentifier(value){const id=String(value||"");return/^[A-Za-z0-9_-]{1,80}$/.test(id)?id:crypto.randomUUID()}
-function normalizeVlan(v={}){
-  const reserved=Math.max(1,Number(v.reserved||1));let pool={start:"",end:""};try{pool=defaultDhcpPool(v.cidr,reserved)}catch{}
-  return{id:safeIdentifier(v.id),name:String(v.name||"Network").slice(0,100),vid:Number(v.vid||1),role:String(v.role||"other").slice(0,30),devices:Math.max(1,Number(v.devices||1)),cidr:String(v.cidr||""),gateway:String(v.gateway||firstUsable(v.cidr)),dhcpEnabled:v.dhcpEnabled!==false,reserved,dhcpStart:String(v.dhcpStart||pool.start),dhcpEnd:String(v.dhcpEnd||pool.end),notes:String(v.notes||"").slice(0,2000)};
+const IMPORT_LIMITS={siteDevices:[1,50000],growth:[0,1000],coordinate:[0,100],vlanId:[1,4094],vlanDevices:[1,65534],reserved:[1,1000]};
+function finiteBounded(value,fallback,[min,max],integer=false){
+  if(value===null||value===undefined||(typeof value==="string"&&!value.trim())||!(["number","string"].includes(typeof value)))return fallback;
+  const numeric=Number(value);if(!Number.isFinite(numeric))return fallback;
+  const bounded=Math.min(max,Math.max(min,numeric));return integer?Math.trunc(bounded):bounded;
 }
-function normalizeSite(s={}){
-  return{id:safeIdentifier(s.id),name:String(s.name||"Site").slice(0,100),type:String(s.type||"office").slice(0,30),cidr:String(s.cidr||""),devices:Math.max(1,Number(s.devices||1)),wan:String(s.wan||"single"),growth:Number(s.growth??30),x:Number(s.x??20),y:Number(s.y??20),topologyRole:String(s.topologyRole||"standalone"),hubId:s.hubId?String(s.hubId):null,internetBreakout:String(s.internetBreakout||"local"),notes:String(s.notes||"").slice(0,2000),vlans:Array.isArray(s.vlans)?s.vlans.map(normalizeVlan):[]};
+function normalizeVlan(raw={}){
+  const v=raw&&typeof raw==="object"?raw:{};
+  const reserved=finiteBounded(v.reserved,1,IMPORT_LIMITS.reserved,true),cidr=String(v.cidr||"");let pool={start:"",end:""};try{pool=defaultDhcpPool(cidr,reserved)}catch{}
+  return{id:safeIdentifier(v.id),name:String(v.name||"Network").slice(0,100),vid:finiteBounded(v.vid,1,IMPORT_LIMITS.vlanId,true),role:String(v.role||"other").slice(0,30),devices:finiteBounded(v.devices,1,IMPORT_LIMITS.vlanDevices,true),cidr,gateway:String(v.gateway||firstUsable(cidr)),dhcpEnabled:v.dhcpEnabled!==false,reserved,dhcpStart:String(v.dhcpStart||pool.start),dhcpEnd:String(v.dhcpEnd||pool.end),notes:String(v.notes||"").slice(0,2000)};
+}
+function normalizeSite(raw={}){
+  const s=raw&&typeof raw==="object"?raw:{};
+  return{id:safeIdentifier(s.id),name:String(s.name||"Site").slice(0,100),type:String(s.type||"office").slice(0,30),cidr:String(s.cidr||""),devices:finiteBounded(s.devices,1,IMPORT_LIMITS.siteDevices,true),wan:String(s.wan||"single"),growth:finiteBounded(s.growth,30,IMPORT_LIMITS.growth),x:finiteBounded(s.x,20,IMPORT_LIMITS.coordinate),y:finiteBounded(s.y,20,IMPORT_LIMITS.coordinate),topologyRole:String(s.topologyRole||"standalone"),hubId:s.hubId?String(s.hubId):null,internetBreakout:String(s.internetBreakout||"local"),notes:String(s.notes||"").slice(0,2000),vlans:Array.isArray(s.vlans)?s.vlans.map(normalizeVlan):[]};
 }
 function normalizeLink(l={}){
   return{id:safeIdentifier(l.id),from:String(l.from||""),to:String(l.to||""),type:String(l.type||"vpn"),resilience:String(l.resilience||"single"),routingType:String(l.routingType||"static"),transitAllowed:l.transitAllowed!==false,defaultRoute:Boolean(l.defaultRoute),advertisedPrefixes:Array.isArray(l.advertisedPrefixes)?l.advertisedPrefixes.map(String):[]};

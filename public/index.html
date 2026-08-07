@@ -4,14 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="Plan IPv4 networks, VLANs, sites and VPN connectivity with guided recommendations.">
-  <meta name="theme-color" content="#102820">
+  <meta name="theme-color" content="#07100e">
   <meta property="og:title" content="Network Planner Studio">
   <meta property="og:description" content="Map existing IPv4 ranges, plan sites and VLANs, validate capacity, and simulate routes on a live topology.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://network.illek.ie/">
   <meta name="twitter:card" content="summary">
   <link rel="canonical" href="https://network.illek.ie/">
-  <title>Network Planner Studio</title>
+  <title>Network Planner Studio — IPv4 network design, made visible</title>
   <link rel="icon" href="/favicon.svg">
   <link rel="stylesheet" href="/styles.css">
   <script src="/app.js" type="module"></script>
@@ -29,6 +29,7 @@
     </div>
     <div class="top-actions">
       <span class="save-state" id="save-state">Saved locally</span>
+      <a class="button ghost" href="https://tools.illek.ie" rel="noopener">Illek Tools</a>
       <button class="button home-button" id="home-button" type="button">Home</button>
       <button class="button recommend-button" id="recommend-button" type="button">✦ Recommend</button>
       <button class="button ghost" id="undo-button" type="button" disabled aria-label="Undo last change">Undo</button>
@@ -43,9 +44,9 @@
   <main id="main-content">
     <section id="welcome" class="welcome">
       <div class="welcome-copy">
-        <span class="kicker">IPv4 network design, made visible</span>
-        <h1>Start with what exists.<br>Design what comes next.</h1>
-        <p>Map offices, VLANs and WAN connections. Network Planner checks capacity, overlap and routing assumptions as the design grows.</p>
+        <span class="kicker">04 — Network architecture</span>
+        <h1>Start with what exists.<br><em>Design what comes next.</em></h1>
+        <p>IPv4 network design, made visible. Map offices, VLANs and WAN connections — capacity, overlap and routing are checked as the design grows.</p>
         <div class="welcome-actions">
           <button class="button primary large" data-start="existing" type="button">Map an existing network</button>
           <button class="button secondary large" data-start="new" type="button">Plan a new network</button>
@@ -54,6 +55,10 @@
         </div>
         <button class="sample-link" data-start="sample" type="button">Or explore a complete example →</button>
       </div>
+      <footer class="welcome-footer">
+        <span>Part of <a href="https://tools.illek.ie">Illek Tools</a> — free, no login.</span>
+        <span><a href="https://tools.illek.ie/privacy">Privacy</a></span>
+      </footer>
       <div class="welcome-visual" aria-hidden="true">
         <div class="map-grid"></div>
         <div class="mini-node node-a"><span>HQ</span><small>4 VLANs</small></div>

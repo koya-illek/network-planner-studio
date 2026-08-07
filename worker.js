@@ -10,6 +10,15 @@ const SECURITY_HEADERS = {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    // Canonical host redirect: legacy/staging hostnames 301 to network.illek.ie
+    if (url.hostname !== "network.illek.ie" && url.hostname !== "localhost" && !url.hostname.endsWith(".workers.dev")) {
+      const target = new URL(request.url);
+      target.hostname = "network.illek.ie";
+      target.protocol = "https:";
+      return Response.redirect(target.toString(), 301);
+    }
+
     if (url.pathname === "/api/health") {
       return Response.json({
         ok: true,

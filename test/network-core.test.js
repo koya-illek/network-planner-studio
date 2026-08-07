@@ -49,6 +49,37 @@ test("finds a multi-hop spoke path through a hub",()=>{
   assert.equal(shortestPath(sites,links,"a","b",{topologyMode:"hub-spoke",spokeToSpoke:"denied"}),null);
 });
 
+test("does not traverse a direct spoke link under via-hub policy",()=>{
+  const sites=[{id:"h",topologyRole:"hub"},{id:"a",topologyRole:"spoke"},{id:"b",topologyRole:"spoke"}];
+  const links=[
+    {id:"ab",from:"a",to:"b",transitAllowed:true},
+    {id:"ah",from:"a",to:"h",transitAllowed:true},
+    {id:"hb",from:"h",to:"b",transitAllowed:true}
+  ];
+  assert.deepEqual(shortestPath(sites,links,"a","b",{topologyMode:"hub-spoke",spokeToSpoke:"via-hub"}),{sites:["a","h","b"],links:["ah","hb"]});
+});
+
+test("bounds malformed imported numeric fields to finite values",()=>{
+  const result=migrateDesign({sites:[{
+    id:"s",devices:Number.NaN,growth:"not-a-number",x:Infinity,y:"oops",vlans:[
+      {id:"v",vid:"NaN",devices:"Infinity",reserved:"bad",cidr:"10.0.0.0/24"}
+    ]
+  }],links:[]});
+  const site=result.sites[0],vlan=site.vlans[0];
+  assert.deepEqual({devices:site.devices,growth:site.growth,x:site.x,y:site.y},{devices:1,growth:30,x:20,y:20});
+  assert.deepEqual({vid:vlan.vid,devices:vlan.devices,reserved:vlan.reserved},{vid:1,devices:1,reserved:1});
+  assert.ok([site.devices,site.growth,site.x,site.y,vlan.vid,vlan.devices,vlan.reserved].every(Number.isFinite));
+
+  const bounded=migrateDesign({sites:[{
+    id:"bounded",devices:999999,growth:-5,x:-10,y:999,vlans:[
+      {id:"v",vid:9999,devices:999999,reserved:9999,cidr:"10.1.0.0/24"}
+    ]
+  }],links:[]});
+  const boundedSite=bounded.sites[0],boundedVlan=boundedSite.vlans[0];
+  assert.deepEqual({devices:boundedSite.devices,growth:boundedSite.growth,x:boundedSite.x,y:boundedSite.y},{devices:50000,growth:0,x:0,y:100});
+  assert.deepEqual({vid:boundedVlan.vid,devices:boundedVlan.devices,reserved:boundedVlan.reserved},{vid:4094,devices:65534,reserved:1000});
+});
+
 test("migrates v1 designs and removes dangling links",()=>{
   const result=migrateDesign({version:1,name:"Old",sites:[{id:"a",name:"A",vlans:[]}],links:[{id:"x",from:"a",to:"missing"}]});
   assert.equal(result.version,2);

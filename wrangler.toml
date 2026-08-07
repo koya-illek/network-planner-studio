@@ -12,3 +12,7 @@ enabled = true
 [[routes]]
 pattern = "network.illek.ie"
 custom_domain = true
+
+[[routes]]
+pattern = "netplanner.illek.ie"
+custom_domain = true
