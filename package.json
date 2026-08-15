@@ -10,7 +10,11 @@
     "deploy": "wrangler deploy"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@playwright/test": "^1.61.1",
-    "wrangler": "^4.114.0"
+    "wrangler": "^4.123.0"
+  },
+  "overrides": {
+    "undici": "7.29.0"
   }
 }

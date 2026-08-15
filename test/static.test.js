@@ -33,7 +33,15 @@ test("worker exposes health and hardened assets", async () => {
   assert.ok(headers.includes("Content-Security-Policy"));
   assert.ok(headers.includes("Strict-Transport-Security"));
   assert.match(worker, /env\.ASSETS\.fetch/);
+  assert.match(worker, /X-Robots-Tag/);
+  const wrangler = await readFile(new URL("wrangler.toml", root), "utf8");
+  assert.match(wrangler, /run_worker_first\s*=\s*true/);
   const html = await readFile(new URL("public/index.html", root), "utf8");
   assert.match(html, /rel="canonical"/);
+  assert.match(html, /property="og:image"/);
+  assert.match(html, /<script type="application\/ld\+json">/);
   assert.match(html, /Skip to network planner/);
+  assert.equal((html.match(/<h1\b/g) ?? []).length, 1);
+  assert.doesNotMatch(html, /class="(?:eyebrow|kicker)"/);
+  assert.doesNotMatch(html, /—/);
 });

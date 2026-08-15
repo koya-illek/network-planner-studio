@@ -1,4 +1,4 @@
-import {ipToInt,intToIp,parseCidr,rangesOverlap,contains,firstUsable,endpointCapacity,defaultDhcpPool,validHostInSubnet,prefixForDevices,nextSubnet,suggestSiteRange as suggestSiteRangeCore,isPrivateCidr,shortestPath,migrateDesign} from "./network-core.js";
+import {SCHEMA_ID,SCHEMA_VERSION,ENUMS,ipToInt,parseCidr,parseRoutePrefix,rangesOverlap,contains,firstUsable,endpointCapacity,defaultDhcpPool,validHostInSubnet,validateGateway,validateDhcpPool,prefixForDevices,nextSubnet,suggestSiteRange as suggestSiteRangeCore,isPrivateCidr,isPrivateRoutePrefix,shortestPath,migrateDesign,createSite,createVlan,createLink,validateDesign} from "./network-core.js";
 
 const STORAGE_KEY = "network-planner-studio.v1";
 const LIBRARY_KEY = "network-planner-studio.projects.v1";
@@ -7,6 +7,20 @@ const TYPE_ICONS = {office:"OF",branch:"BR",datacentre:"DC",cloud:"CL",warehouse
 const $ = (selector, root=document) => root.querySelector(selector);
 const $$ = (selector, root=document) => [...root.querySelectorAll(selector)];
 const uid = () => crypto.randomUUID();
+
+let storageIssue = "";
+function storageGet(key) {
+  try { return localStorage.getItem(key); }
+  catch { storageIssue = "Browser storage is unavailable. Export a recovery copy before leaving this page."; return null; }
+}
+function storageSet(key, value) {
+  try { localStorage.setItem(key, value); return true; }
+  catch { storageIssue = "Browser storage is full or unavailable. Export a recovery copy before continuing."; return false; }
+}
+function storageRemove(key) {
+  try { localStorage.removeItem(key); }
+  catch { storageIssue = "Browser storage is unavailable."; }
+}
 
 let state = loadState() || blankState();
 let selected = null;
@@ -24,13 +38,13 @@ let canvasPan = {x:0,y:0};
 let panDrag = null;
 
 function blankState() {
-  return {version:2,projectId:uid(),name:"Untitled network",mode:null,topologyMode:"custom",policies:{spokeToSpoke:"via-hub",centralizedInspection:false},flowPolicies:{},assumptions:[],sites:[],links:[],updatedAt:new Date().toISOString()};
+  return {schema:SCHEMA_ID,version:SCHEMA_VERSION,projectId:uid(),name:"Untitled network",mode:null,topologyMode:"custom",policies:{spokeToSpoke:"via-hub",centralizedInspection:false,secondaryHubId:null},flowPolicies:{},assumptions:[],sites:[],links:[],updatedAt:new Date().toISOString()};
 }
 
 function sampleState() {
   const hq=uid(), branch=uid(), cloud=uid();
   return {
-    version:2,projectId:uid(),name:"Illek example network",mode:"sample",topologyMode:"hub-spoke",policies:{spokeToSpoke:"via-hub",centralizedInspection:true},flowPolicies:{},assumptions:["Cork HQ provides transit and centralized inspection."],updatedAt:new Date().toISOString(),
+    schema:SCHEMA_ID,version:SCHEMA_VERSION,projectId:uid(),name:"Illek example network",mode:"sample",topologyMode:"hub-spoke",policies:{spokeToSpoke:"via-hub",centralizedInspection:true,secondaryHubId:null},flowPolicies:{},assumptions:["Cork HQ provides transit and centralized inspection."],updatedAt:new Date().toISOString(),
     sites:[
       {id:hq,name:"Cork HQ",type:"office",cidr:"10.20.0.0/16",devices:180,wan:"dual",growth:30,x:42,y:40,topologyRole:"hub",hubId:null,internetBreakout:"local",notes:"Primary network hub.",vlans:[
         vlan("Staff",10,"users",100,"10.20.10.0/25"),vlan("Voice",20,"voice",80,"10.20.20.0/25"),vlan("Guest",30,"guest",120,"10.20.30.0/24"),vlan("Management",99,"management",22,"10.20.99.0/27")
@@ -49,18 +63,20 @@ function sampleState() {
   };
 }
 
-function vlan(name,vid,role,devices,cidr){const pool=defaultDhcpPool(cidr,1);return{id:uid(),name,vid,role,devices,cidr,gateway:firstUsable(cidr),dhcpEnabled:role!=="servers",reserved:1,dhcpStart:pool.start,dhcpEnd:pool.end,notes:""}}
+function vlan(name,vid,role,devices,cidr){const pool=defaultDhcpPool(cidr,1);return createVlan({id:uid(),name,vid,role,devices,cidr,gateway:firstUsable(cidr),dhcpEnabled:role!=="servers",reserved:1,dhcpStart:pool.start,dhcpEnd:pool.end,notes:"",siteCidr:"10.0.0.0/8"})}
 
 function suggestSiteRange(devices=50,growth=30){
   return suggestSiteRangeCore(state.sites.map(s=>s.cidr).filter(Boolean),devices,growth);
 }
-function loadState(){try{const value=JSON.parse(localStorage.getItem(STORAGE_KEY));return value?migrateDesign(value):null}catch{return null}}
-function loadLibrary(){try{return JSON.parse(localStorage.getItem(LIBRARY_KEY))||{}}catch{return{}}}
+function loadState(){try{const value=JSON.parse(storageGet(STORAGE_KEY));return value?migrateDesign(value,{strict:false}):null}catch(error){storageIssue="The saved design could not be read. Start a new design or import a recovery copy.";return null}}
+function loadLibrary(){try{const value=JSON.parse(storageGet(LIBRARY_KEY));return value&&typeof value==="object"?value:{}}catch{storageIssue="The local project library could not be read. Export current work before continuing.";return{}}}
 function saveState(){
   state.updatedAt=new Date().toISOString();
-  localStorage.setItem(STORAGE_KEY,JSON.stringify(state));
-  const library=loadLibrary();library[state.projectId]=state;localStorage.setItem(LIBRARY_KEY,JSON.stringify(library));
-  $("#save-state").textContent="Saved locally";
+  const saved=storageSet(STORAGE_KEY,JSON.stringify(state));
+  const library=loadLibrary();library[state.projectId]=state;
+  const librarySaved=storageSet(LIBRARY_KEY,JSON.stringify(library));
+  $("#save-state").textContent=saved&&librarySaved?"Saved locally":"Storage needs recovery";
+  if(!saved||!librarySaved) showToast(storageIssue);
 }
 function pushHistory(){
   undoStack.push(JSON.stringify(state));if(undoStack.length>40)undoStack.shift();redoStack=[];updateHistoryButtons();
@@ -77,7 +93,7 @@ function showToast(message){const el=$("#toast");el.textContent=message;el.class
 function start(mode){
   if(mode==="sample") state=sampleState();
   else {state=blankState();state.mode=mode}
-  saveState();$("#welcome").classList.add("hidden");$("#workspace").classList.remove("hidden");render();
+  saveState();window.scrollTo({top:0,left:0,behavior:"auto"});$("#welcome").classList.add("hidden");$("#workspace").classList.remove("hidden");render();
   if(mode!=="sample") openSiteDialog();
 }
 function enterWorkspace(){
@@ -105,15 +121,20 @@ function render(){
   updateHistoryButtons();
   $("#empty-canvas").classList.toggle("hidden",state.sites.length>0);
 }
+function activateView(view, moveFocus=false){
+  $$('[data-view]').forEach(button=>{const active=button.dataset.view===view;button.classList.toggle("active",active);button.setAttribute("aria-selected",String(active));button.tabIndex=active?0:-1});
+  $$(".view").forEach(panel=>{const active=panel.id===`${view}-view`;panel.classList.toggle("active",active);panel.hidden=!active});
+  if(moveFocus)document.querySelector(`[data-view="${view}"]`)?.focus();
+}
 
 function renderSiteList(){
   const root=$("#site-list");root.innerHTML="";
   for(const site of state.sites){
     const wrap=document.createElement("div");wrap.className="site-tree";
-    wrap.innerHTML=`<div class="site-row ${selected?.type==="site"&&selected.id===site.id?"selected":""}" data-site="${site.id}">
-      <span class="site-symbol">${TYPE_ICONS[site.type]||"ST"}</span><span class="site-row-text"><strong>${escapeHtml(site.name)}</strong><small>${escapeHtml(site.cidr)}</small></span>
-      <button class="add-vlan-mini" data-add-vlan="${site.id}" type="button" title="Add VLAN to ${escapeHtml(site.name)}">+</button></div>
-      <div class="vlan-list">${site.vlans.map(v=>`<div class="vlan-row ${selected?.type==="vlan"&&selected.id===v.id?"selected":""}" data-vlan="${v.id}" data-parent="${site.id}"><i class="vlan-dot" style="background:${ROLE_COLORS[v.role]}"></i><span>${escapeHtml(v.name)} · ${v.vid}</span><code>${escapeHtml(v.cidr)}</code></div>`).join("")}</div>`;
+    wrap.innerHTML=`<div class="site-row ${selected?.type==="site"&&selected.id===site.id?"selected":""}">
+      <button class="site-row-select" data-site="${site.id}" type="button" aria-pressed="${selected?.type==="site"&&selected.id===site.id}"><span class="site-symbol">${TYPE_ICONS[site.type]||"ST"}</span><span class="site-row-text"><strong>${escapeHtml(site.name)}</strong><small>${escapeHtml(site.cidr)}</small></span></button>
+      <button class="add-vlan-mini" data-add-vlan="${site.id}" type="button" aria-label="Add VLAN to ${escapeHtml(site.name)}">+</button></div>
+      <div class="vlan-list">${site.vlans.map(v=>`<div class="vlan-row ${selected?.type==="vlan"&&selected.id===v.id?"selected":""}" data-vlan="${v.id}" data-parent="${site.id}" role="button" tabindex="0" aria-pressed="${selected?.type==="vlan"&&selected.id===v.id}"><i class="vlan-dot ${roleClass(v.role)}" aria-hidden="true"></i><span>${escapeHtml(v.name)} · ${v.vid}</span><code>${escapeHtml(v.cidr)}</code></div>`).join("")}</div>`;
     root.append(wrap);
   }
   const issues=reviewDesign();
@@ -152,14 +173,14 @@ function renderInspector(){
   if(selected.type==="site"){
     const s=state.sites.find(x=>x.id===selected.id);if(!s){selected=null;return renderInspector()}
     const cap=s.vlans.reduce((n,v)=>n+safeCapacity(v),0);
-    root.innerHTML=`<div class="inspector-content"><span class="eyebrow">${escapeHtml(s.type)} · ${escapeHtml(s.topologyRole||"standalone")}</span><h2>${escapeHtml(s.name)}</h2><p>This site owns its parent IPv4 range. Add existing or proposed VLANs inside it.</p>
+    root.innerHTML=`<div class="inspector-content"><p class="context-label">${escapeHtml(s.type)} · ${escapeHtml(s.topologyRole||"standalone")}</p><h2>${escapeHtml(s.name)}</h2><p>This site owns its parent IPv4 range. Add existing or proposed VLANs inside it.</p>
       <div class="detail-grid"><div class="detail"><span>Site range</span><strong>${escapeHtml(s.cidr)}</strong></div><div class="detail"><span>VLANs</span><strong>${s.vlans.length}</strong></div><div class="detail"><span>Planned devices</span><strong>${s.devices}</strong></div><div class="detail"><span>VLAN capacity</span><strong>${cap}</strong></div></div>
       <div class="inspector-section"><h3>Connectivity</h3><p>${connectionsFor(s.id)} connection${connectionsFor(s.id)===1?"":"s"} · ${s.wan==="dual"?"Dual WAN":s.wan==="single"?"Single WAN":"No direct WAN"} · ${s.internetBreakout||"local"} breakout</p></div>
       ${s.notes?`<div class="inspector-section"><h3>Notes</h3><p>${escapeHtml(s.notes)}</p></div>`:""}
       <div class="inspector-actions"><button class="button primary" data-inspector-add-vlan="${s.id}" type="button">+ Add VLAN</button><button class="button secondary" data-recommend-vlan="${s.id}" type="button">✦ Recommend VLAN</button><button class="button ghost" data-edit-site="${s.id}" type="button">Edit</button><button class="button ghost" data-delete-site="${s.id}" type="button">Delete site</button></div></div>`;
   } else if(selected.type==="vlan"){
     const found=findVlan(selected.id);if(!found){selected=null;return renderInspector()}const {site,vlan:v}=found,p=safeParse(v.cidr),capacity=safeCapacity(v),head=p?Math.round((1-v.devices/capacity)*100):0;
-    root.innerHTML=`<div class="inspector-content"><span class="eyebrow">VLAN ${v.vid} · ${escapeHtml(v.role)}</span><h2>${escapeHtml(v.name)}</h2><p>Segment within ${escapeHtml(site.name)}.</p>
+    root.innerHTML=`<div class="inspector-content"><p class="context-label">VLAN ${v.vid} · ${escapeHtml(v.role)}</p><h2>${escapeHtml(v.name)}</h2><p>Segment within ${escapeHtml(site.name)}.</p>
       <div class="detail-grid"><div class="detail"><span>IPv4 subnet</span><strong>${escapeHtml(v.cidr)}</strong></div><div class="detail"><span>Gateway</span><strong>${escapeHtml(v.gateway)}</strong></div><div class="detail"><span>Devices</span><strong>${v.devices}</strong></div><div class="detail"><span>Headroom</span><strong>${head}%</strong></div></div>
       <div class="inspector-section"><h3>DHCP and reservations</h3><p>${v.dhcpEnabled?`${escapeHtml(v.dhcpStart)} – ${escapeHtml(v.dhcpEnd)}`:"Static addressing"} · ${v.reserved||1} reserved address${(v.reserved||1)===1?"":"es"}</p></div>
       <div class="inspector-section"><h3>Best-practice note</h3><p>${roleAdvice(v.role)}</p></div>
@@ -167,7 +188,7 @@ function renderInspector(){
       <div class="inspector-actions"><button class="button ghost" data-edit-vlan="${v.id}" type="button">Edit</button><button class="button ghost" data-delete-vlan="${v.id}" type="button">Delete VLAN</button></div></div>`;
   } else {
     const l=state.links.find(x=>x.id===selected.id),a=l&&state.sites.find(s=>s.id===l.from),b=l&&state.sites.find(s=>s.id===l.to);if(!l||!a||!b){selected=null;return renderInspector()}
-    root.innerHTML=`<div class="inspector-content"><span class="eyebrow">WAN connection</span><h2>${escapeHtml(a.name)} ↔ ${escapeHtml(b.name)}</h2><p>${linkLabel(l)} with ${l.resilience==="dual"?"redundant paths":"a single path"}.</p><div class="detail-grid"><div class="detail"><span>Type</span><strong>${linkLabel(l)}</strong></div><div class="detail"><span>Resilience</span><strong>${l.resilience}</strong></div><div class="detail"><span>Routing</span><strong>${l.routingType||"static"}</strong></div><div class="detail"><span>Transit</span><strong>${l.transitAllowed===false?"blocked":"allowed"}</strong></div></div><div class="inspector-actions"><button class="button primary" data-trace-link="${l.id}" type="button">Trace path</button><button class="button ghost" data-edit-link="${l.id}" type="button">Edit</button><button class="button ghost" data-delete-link="${l.id}" type="button">Delete</button></div></div>`;
+    root.innerHTML=`<div class="inspector-content"><p class="context-label">WAN connection</p><h2>${escapeHtml(a.name)} to ${escapeHtml(b.name)}</h2><p>${linkLabel(l)} with ${l.resilience==="dual"?"redundant paths":"a single path"}.</p><div class="detail-grid"><div class="detail"><span>Type</span><strong>${linkLabel(l)}</strong></div><div class="detail"><span>Resilience</span><strong>${l.resilience}</strong></div><div class="detail"><span>Routing</span><strong>${l.routingType||"static"}</strong></div><div class="detail"><span>Transit</span><strong>${l.transitAllowed===false?"blocked":"allowed"}</strong></div></div><div class="inspector-actions"><button class="button primary" data-trace-link="${l.id}" type="button">Trace path</button><button class="button ghost" data-edit-link="${l.id}" type="button">Edit</button><button class="button ghost" data-delete-link="${l.id}" type="button">Delete</button></div></div>`;
   }
 }
 function connectionsFor(id){return state.links.filter(l=>l.from===id||l.to===id).length}
@@ -181,40 +202,41 @@ function renderAddressPlan(){
   ].map(([a,b])=>`<div class="summary-card"><span>${a}</span><strong>${b}</strong></div>`).join("");
   $("#address-table").innerHTML=all.length?all.map(({site,vlan:v,p})=>{
     const capacity=safeCapacity(v),head=p?Math.round((1-v.devices/capacity)*100):0,status=!p?["Invalid","error"]:v.devices>capacity?["Over capacity","error"]:head<20?["Low headroom","warning"]:["Healthy",""];
-    return `<tr><td><strong>${escapeHtml(site.name)}</strong><br><small>${escapeHtml(v.name)}</small></td><td>${v.vid}</td><td><code>${escapeHtml(v.cidr)}</code></td><td><code>${escapeHtml(v.gateway)}</code></td><td>${v.devices}</td><td>${p?capacity:"—"}</td><td>${p?head+"%":"—"}</td><td><span class="status-pill ${status[1]}">${status[0]}</span></td></tr>`
+    return `<tr><td><strong>${escapeHtml(site.name)}</strong><br><small>${escapeHtml(v.name)}</small></td><td>${v.vid}</td><td><code>${escapeHtml(v.cidr)}</code></td><td><code>${escapeHtml(v.gateway)}</code></td><td>${v.devices}</td><td>${p?capacity:"Unavailable"}</td><td>${p?head+"%":"Unavailable"}</td><td><span class="status-pill ${status[1]}">${status[0]}</span></td></tr>`
   }).join(""):`<tr><td colspan="8">No VLANs have been added yet.</td></tr>`;
 }
 
 function reviewDesign(){
   const issues=[];
-  if(!state.sites.length) return [{severity:"info",title:"Start the address hierarchy",message:"Add a site with a parent IPv4 range, then create VLANs inside it."}];
+  if(!state.sites.length)return[{severity:"info",title:"Start the address hierarchy",message:"Add a site with a parent IPv4 range and create VLANs inside it."}];
   for(let i=0;i<state.sites.length;i++){
     const s=state.sites[i],sp=safeParse(s.cidr);
-    if(!sp) issues.push(issue("error","Invalid site range",`${s.name} does not have a valid IPv4 CIDR range.`,s.id));
+    if(!sp)issues.push(issue("error","Invalid site range",`${s.name} does not have a valid IPv4 CIDR range.`,s.id));
     else if(!isPrivateCidr(s.cidr))issues.push(issue("warning","Public site address space",`${s.name} uses ${s.cidr}, which is not RFC1918 private address space. Confirm ownership and intent.`,s.id));
-    for(let j=i+1;j<state.sites.length;j++) if(rangesOverlap(s.cidr,state.sites[j].cidr)) issues.push(issue("error","Overlapping site ranges",`${s.name} and ${state.sites[j].name} overlap. VPN routing between them will be ambiguous.`,s.id));
-    if(s.wan==="single"&&connectionsFor(s.id)>0) issues.push(issue("warning","Single WAN dependency",`${s.name} has inter-site connectivity but only one WAN path. Document the accepted outage risk.`,s.id));
-    if(!s.vlans.length) issues.push(issue("warning","No VLANs defined",`${s.name} has a parent range but no usable networks yet.`,s.id));
+    for(let j=i+1;j<state.sites.length;j++)if(rangesOverlap(s.cidr,state.sites[j].cidr))issues.push(issue("error","Overlapping site ranges",`${s.name} and ${state.sites[j].name} overlap. VPN routing between them will be ambiguous.`,s.id));
+    if(s.wan==="single"&&connectionsFor(s.id)>0)issues.push(issue("warning","Single WAN dependency",`${s.name} has inter-site connectivity but only one WAN path. Document the accepted outage risk.`,s.id));
+    if(!s.vlans.length)issues.push(issue("warning","No VLANs defined",`${s.name} has a parent range but no usable networks yet.`,s.id));
     const vids=new Map();
     for(let vIndex=0;vIndex<s.vlans.length;vIndex++){
       const v=s.vlans[vIndex],p=safeParse(v.cidr);
-      if(vids.has(v.vid)) issues.push(issue("error","Duplicate VLAN ID",`${s.name} uses VLAN ${v.vid} for both ${vids.get(v.vid)} and ${v.name}.`,s.id));
+      if(vids.has(v.vid))issues.push(issue("error","Duplicate VLAN ID",`${s.name} uses VLAN ${v.vid} for both ${vids.get(v.vid)} and ${v.name}.`,s.id));
       vids.set(v.vid,v.name);
-      if(!p) issues.push(issue("error","Invalid VLAN subnet",`${s.name} / ${v.name} has an invalid IPv4 subnet.`,s.id));
-      else {
-        if(sp&&!contains(s.cidr,v.cidr)) issues.push(issue("error","VLAN outside site range",`${v.cidr} is not contained by ${s.name}'s ${s.cidr} allocation.`,s.id));
+      if(!p)issues.push(issue("error","Invalid VLAN subnet",`${s.name} / ${v.name} has an invalid IPv4 subnet.`,s.id));
+      else{
+        if(sp&&!contains(s.cidr,v.cidr))issues.push(issue("error","VLAN outside site range",`${v.cidr} is not contained by ${s.name}'s ${s.cidr} allocation.`,s.id));
         const capacity=safeCapacity(v);
-        if(v.devices>capacity) issues.push(issue("error","Subnet over capacity",`${s.name} / ${v.name} needs ${v.devices} endpoint addresses but ${v.cidr} has only ${capacity} after reservations.`,s.id));
-        else if(v.devices/capacity>.8) issues.push(issue("warning","Low address headroom",`${s.name} / ${v.name} is planned above 80% of endpoint capacity.`,s.id));
+        if(v.devices>capacity)issues.push(issue("error","Subnet over capacity",`${s.name} / ${v.name} needs ${v.devices} endpoint addresses but ${v.cidr} has only ${capacity} after reservations.`,s.id));
+        else if(capacity>0&&v.devices/capacity>.8)issues.push(issue("warning","Low address headroom",`${s.name} / ${v.name} is planned above 80% of endpoint capacity.`,s.id));
         if(p.prefix===31&&v.role!=="transit")issues.push(issue("error","Invalid /31 use",`${s.name} / ${v.name} uses /31 but is not a transit network.`,s.id));
-        if(p.prefix<22&&v.role!=="guest") issues.push(issue("advice","Large broadcast domain",`${s.name} / ${v.name} is a /${p.prefix}. Consider whether a smaller failure and broadcast domain is preferable.`,s.id));
-        if(v.dhcpEnabled&&(!validHostInSubnet(v.dhcpStart,v.cidr)||!validHostInSubnet(v.dhcpEnd,v.cidr)||ipToInt(v.dhcpStart)>ipToInt(v.dhcpEnd)))issues.push(issue("error","Invalid DHCP pool",`${s.name} / ${v.name} has a DHCP pool outside its usable subnet.`,s.id));
-        if(v.dhcpEnabled&&validHostInSubnet(v.gateway,v.cidr)&&validHostInSubnet(v.dhcpStart,v.cidr)&&ipToInt(v.gateway)>=ipToInt(v.dhcpStart)&&ipToInt(v.gateway)<=ipToInt(v.dhcpEnd))issues.push(issue("error","Gateway inside DHCP pool",`${s.name} / ${v.name} must exclude gateway ${v.gateway} from DHCP.`,s.id));
+        if(p.prefix<22&&v.role!=="guest")issues.push(issue("advice","Large broadcast domain",`${s.name} / ${v.name} is a /${p.prefix}. Consider whether a smaller failure and broadcast domain is preferable.`,s.id));
+        if(!validateGateway(v.gateway,v.cidr,{transit:v.role==="transit"}))issues.push(issue("error","Invalid gateway",`${s.name} / ${v.name} must use a usable gateway inside ${v.cidr}.`,s.id));
+        const pool=validateDhcpPool(v.cidr,v.gateway,v.reserved,{enabled:v.dhcpEnabled,start:v.dhcpStart,end:v.dhcpEnd});
+        for(const message of pool.errors)issues.push(issue("error",message.includes("gateway")?"Gateway inside DHCP pool":"Invalid DHCP pool",`${s.name} / ${v.name}: ${message}.`,s.id));
       }
-      for(let k=vIndex+1;k<s.vlans.length;k++) if(rangesOverlap(v.cidr,s.vlans[k].cidr)) issues.push(issue("error","Overlapping VLAN subnets",`${s.name}: ${v.name} overlaps ${s.vlans[k].name}.`,s.id));
+      for(let k=vIndex+1;k<s.vlans.length;k++)if(rangesOverlap(v.cidr,s.vlans[k].cidr))issues.push(issue("error","Overlapping VLAN subnets",`${s.name}: ${v.name} overlaps ${s.vlans[k].name}.`,s.id));
     }
-    if(s.vlans.length>=3&&!s.vlans.some(v=>v.role==="management")) issues.push(issue("advice","No management segment",`${s.name} has several VLANs but no dedicated network-management segment.`,s.id));
-    if(s.vlans.some(v=>v.role==="guest")&&s.vlans.some(v=>v.role==="users")) issues.push(issue("info","Trust boundary required",`${s.name}'s guest network should be denied access to private staff and infrastructure ranges.`,s.id));
+    if(s.vlans.length>=3&&!s.vlans.some(v=>v.role==="management"))issues.push(issue("advice","No management segment",`${s.name} has several VLANs but no dedicated network-management segment.`,s.id));
+    if(s.vlans.some(v=>v.role==="guest")&&s.vlans.some(v=>v.role==="users"))issues.push(issue("info","Trust boundary required",`${s.name}'s guest network should be denied access to private staff and infrastructure ranges.`,s.id));
   }
   if(state.sites.length>1){
     const visited=new Set(),walk=id=>{visited.add(id);state.links.filter(l=>l.from===id||l.to===id).forEach(l=>{const n=l.from===id?l.to:l.from;if(!visited.has(n))walk(n)})};walk(state.sites[0].id);
@@ -223,12 +245,12 @@ function reviewDesign(){
   for(const link of state.links){
     const a=state.sites.find(s=>s.id===link.from),b=state.sites.find(s=>s.id===link.to);if(!a||!b)continue;
     if(link.routingType==="static"&&!(link.advertisedPrefixes||[]).length)issues.push(issue("warning","Static route intent is missing",`${a.name} ↔ ${b.name} uses static routing but has no documented advertised prefixes.`,a.id));
-    for(const prefix of link.advertisedPrefixes||[])if(!isPrivateCidr(prefix))issues.push(issue("advice","Non-private advertised prefix",`${a.name} ↔ ${b.name} advertises ${prefix}. Confirm ownership and intent.`,a.id));
+    for(const prefix of link.advertisedPrefixes||[]){try{parseRoutePrefix(prefix)}catch(error){issues.push(issue("error","Invalid advertised prefix",`${a.name} ↔ ${b.name}: ${error.message}.`,a.id));continue}if(prefix!=="0.0.0.0/0"&&!isPrivateRoutePrefix(prefix))issues.push(issue("advice","Non-private advertised prefix",`${a.name} ↔ ${b.name} advertises ${prefix}. Confirm ownership and intent.`,a.id));}
   }
   if(state.topologyMode==="hub-spoke"){
     const hubs=state.sites.filter(s=>s.topologyRole==="hub"),spokes=state.sites.filter(s=>s.topologyRole==="spoke");
     if(!hubs.length)issues.push(issue("error","Hub is missing","Hub-and-spoke mode requires at least one site with the hub role."));
-    if(hubs.length===1&&spokes.length>1)issues.push(issue("warning","Single hub dependency",`${hubs[0].name} is the only transit hub for ${spokes.length} spokes.` ,hubs[0].id));
+    if(hubs.length===1&&spokes.length>1)issues.push(issue("warning","Single hub dependency",`${hubs[0].name} is the only transit hub for ${spokes.length} spokes.`,hubs[0].id));
     const secondary=state.sites.find(s=>s.id===state.policies?.secondaryHubId&&s.topologyRole==="hub");
     if(state.policies?.secondaryHubId&&!secondary)issues.push(issue("error","Secondary hub is invalid","The configured secondary hub no longer exists or no longer has the hub role."));
     for(const spoke of spokes){
@@ -238,12 +260,9 @@ function reviewDesign(){
       if(secondary&&!state.links.some(l=>(l.from===spoke.id&&l.to===secondary.id)||(l.to===spoke.id&&l.from===secondary.id)))issues.push(issue("warning","Secondary hub path is missing",`${spoke.name} is not connected to secondary hub ${secondary.name}.`,spoke.id));
       if(spoke.internetBreakout==="hub"&&!state.links.some(l=>((l.from===spoke.id&&l.to===spoke.hubId)||(l.to===spoke.id&&l.from===spoke.hubId))&&l.defaultRoute))issues.push(issue("warning","Central breakout lacks default route",`${spoke.name} uses hub internet breakout but its hub link does not advertise a default route.`,spoke.id));
     }
-    for(const link of state.links){
-      const a=state.sites.find(s=>s.id===link.from),b=state.sites.find(s=>s.id===link.to);
-      if(a?.topologyRole==="spoke"&&b?.topologyRole==="spoke"&&state.policies.spokeToSpoke!=="direct")issues.push(issue("warning","Direct spoke link conflicts with policy",`${a.name} and ${b.name} are directly connected even though spoke traffic is ${state.policies.spokeToSpoke}.`,a.id));
-    }
+    for(const link of state.links){const a=state.sites.find(s=>s.id===link.from),b=state.sites.find(s=>s.id===link.to);if(a?.topologyRole==="spoke"&&b?.topologyRole==="spoke"&&state.policies.spokeToSpoke!=="direct")issues.push(issue("warning","Direct spoke link conflicts with policy",`${a.name} and ${b.name} are directly connected even though spoke traffic is ${state.policies.spokeToSpoke}.`,a.id));}
   }
-  if(!issues.some(i=>["error","warning"].includes(i.severity))) issues.unshift(issue("info","Core checks passed","No overlaps, invalid allocations or immediate capacity risks were found."));
+  if(!issues.some(i=>["error","warning"].includes(i.severity)))issues.unshift(issue("info","Core checks passed","No overlaps, invalid allocations or immediate capacity risks were found."));
   return issues;
 }
 function issue(severity,title,message,siteId){return{severity,title,message,siteId}}
@@ -267,20 +286,25 @@ function defaultFlow(source,destination){
 function renderTrafficPolicy(){
   const root=$("#flow-matrix");if(!root)return;const roles=[...new Set(state.sites.flatMap(s=>s.vlans.map(v=>v.role)))];
   if(!roles.length){root.innerHTML="<p class=\"empty-policy\">Add VLANs to build the trust-zone matrix.</p>";return}
-  root.innerHTML=`<table><thead><tr><th>Source ↓ / Destination →</th>${roles.map(r=>`<th>${escapeHtml(r)}</th>`).join("")}</tr></thead><tbody>${roles.map(source=>`<tr><th>${escapeHtml(source)}</th>${roles.map(destination=>{const key=`${source}:${destination}`,value=state.flowPolicies?.[key]||defaultFlow(source,destination);return`<td><button class="flow-cell ${value}" data-flow="${key}" type="button">${value}</button></td>`}).join("")}</tr>`).join("")}</tbody></table>`;
+  root.innerHTML=`<table><thead><tr><th>Source / destination</th>${roles.map(r=>`<th>${escapeHtml(r)}</th>`).join("")}</tr></thead><tbody>${roles.map(source=>`<tr><th>${escapeHtml(source)}</th>${roles.map(destination=>{const key=`${source}:${destination}`,raw=state.flowPolicies?.[key],value=ENUMS.flowPolicies.includes(raw)?raw:defaultFlow(source,destination);return`<td><button class="flow-cell ${value}" data-flow="${key}" type="button" aria-label="${escapeHtml(`${source} to ${destination}: ${value}`)}">${escapeHtml(value)}</button></td>`}).join("")}</tr>`).join("")}</tbody></table>`;
 }
 
 function renderReport(){
   const root=$("#implementation-report");if(!root)return;
   const issues=reviewDesign(),blocking=issues.filter(i=>i.severity==="error").length,risks=issues.filter(i=>i.severity==="warning").length;
-  const vlans=state.sites.flatMap(site=>site.vlans.map(vlan=>({site,vlan})));
-  const siteName=id=>state.sites.find(s=>s.id===id)?.name||"Unknown";
+  const vlans=state.sites.flatMap(site=>site.vlans.map(vlan=>({site,vlan}))),siteName=id=>state.sites.find(s=>s.id===id)?.name||"Unknown",roles=[...new Set(vlans.map(({vlan})=>vlan.role))];
+  const policyRows=roles.flatMap(source=>roles.map(destination=>{const key=`${source}:${destination}`,value=ENUMS.flowPolicies.includes(state.flowPolicies?.[key])?state.flowPolicies[key]:defaultFlow(source,destination);return`<tr><td>${escapeHtml(source)}</td><td>${escapeHtml(destination)}</td><td>${escapeHtml(value)}</td><td>${value==="deny"?"Trust boundary enforced":value==="allow"?"Explicitly permitted":"Review required before implementation"}</td></tr>`})).join("");
+  const breakoutRows=state.sites.map(site=>`<tr><td>${escapeHtml(site.name)}</td><td>${escapeHtml(site.topologyRole)}</td><td>${escapeHtml(site.hubId?siteName(site.hubId):"Not assigned")}</td><td>${escapeHtml(site.internetBreakout||"local")}</td><td>${state.policies?.centralizedInspection?"Central inspection intended":"No centralized inspection intent"}</td></tr>`).join("");
+  const unresolved=issues.filter(item=>["error","warning","advice"].includes(item.severity));
   root.innerHTML=`<article class="report-sheet">
-    <header class="report-header"><div><span class="eyebrow">IPv4 network design</span><h2>${escapeHtml(state.name)}</h2><p>Generated ${new Date().toLocaleString()} · ${escapeHtml(state.topologyMode)}</p></div><div class="report-status ${blocking?"error":risks?"warning":""}">${blocking?`${blocking} blocking issue${blocking===1?"":"s"}`:risks?`${risks} risk${risks===1?"":"s"} to accept`:"Ready for technical review"}</div></header>
-    <div class="report-kpis">${[["Sites",state.sites.length],["VLANs",vlans.length],["WAN links",state.links.length],["Topology",state.topologyMode]].map(([label,value])=>`<div class="report-kpi"><span>${label}</span><strong>${escapeHtml(value)}</strong></div>`).join("")}</div>
-    <section class="report-section"><h3>Site and address plan</h3><table><thead><tr><th>Site</th><th>Role</th><th>Site range</th><th>VLAN</th><th>Subnet / gateway</th><th>DHCP pool</th><th>Devices</th></tr></thead><tbody>${vlans.length?vlans.map(({site,vlan:v})=>`<tr><td>${escapeHtml(site.name)}</td><td>${escapeHtml(site.topologyRole)}</td><td><code>${escapeHtml(site.cidr)}</code></td><td>${v.vid} · ${escapeHtml(v.name)}</td><td><code>${escapeHtml(v.cidr)}</code><br><small>${escapeHtml(v.gateway)}</small></td><td>${v.dhcpEnabled?`<code>${escapeHtml(v.dhcpStart)}</code><br><small>to ${escapeHtml(v.dhcpEnd)}</small>`:"Static"}</td><td>${v.devices}</td></tr>`).join(""):`<tr><td colspan="7">No VLANs defined.</td></tr>`}</tbody></table></section>
-    <section class="report-section"><h3>WAN and routing intent</h3><table><thead><tr><th>Connection</th><th>Transport</th><th>Resilience</th><th>Routing</th><th>Prefixes / default</th></tr></thead><tbody>${state.links.length?state.links.map(l=>`<tr><td>${escapeHtml(siteName(l.from))} ↔ ${escapeHtml(siteName(l.to))}</td><td>${escapeHtml(linkLabel(l))}</td><td>${escapeHtml(l.resilience)}</td><td>${escapeHtml(l.routingType)} · transit ${l.transitAllowed===false?"denied":"allowed"}</td><td>${(l.advertisedPrefixes||[]).map(escapeHtml).join(", ")||"Learned dynamically"}${l.defaultRoute?" · 0.0.0.0/0":""}</td></tr>`).join(""):`<tr><td colspan="5">No WAN links defined.</td></tr>`}</tbody></table></section>
-    <section class="report-section"><h3>Assumptions and review</h3>${state.assumptions?.length?`<ul>${state.assumptions.map(a=>`<li>${escapeHtml(a)}</li>`).join("")}</ul>`:"<p>No assumptions documented.</p>"}<ul>${issues.map(i=>`<li><strong>${escapeHtml(i.severity.toUpperCase())}:</strong> ${escapeHtml(i.title)} — ${escapeHtml(i.message)}</li>`).join("")}</ul></section>
+    <header class="report-header"><div><p class="context-label">IPv4 network design</p><h2>${escapeHtml(state.name)}</h2><p>Generated ${new Date().toLocaleString()} · ${escapeHtml(state.topologyMode)}</p></div><div class="report-status ${blocking?"error":risks?"warning":""}">${blocking?`${blocking} blocking issue${blocking===1?"":"s"}`:risks?`${risks} risk${risks===1?"":"s"} to accept`:"Ready for technical review"}</div></header>
+    <div class="report-kpis">${[["Sites",state.sites.length],["VLANs",vlans.length],["WAN links",state.links.length],["Schema",`${SCHEMA_ID} v${SCHEMA_VERSION}`]].map(([label,value])=>`<div class="report-kpi"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("")}</div>
+    <section class="report-section"><h3>Site and address plan</h3><table><thead><tr><th>Site</th><th>Role</th><th>Site range</th><th>VLAN</th><th>Subnet and gateway</th><th>DHCP pool</th><th>Reserved</th><th>Devices</th></tr></thead><tbody>${vlans.length?vlans.map(({site,vlan:v})=>`<tr><td>${escapeHtml(site.name)}</td><td>${escapeHtml(site.topologyRole)}</td><td><code>${escapeHtml(site.cidr)}</code></td><td>${v.vid} · ${escapeHtml(v.name)}</td><td><code>${escapeHtml(v.cidr)}</code><br><small>${escapeHtml(v.gateway)}</small></td><td>${v.dhcpEnabled?`<code>${escapeHtml(v.dhcpStart)}</code><br><small>to ${escapeHtml(v.dhcpEnd)}</small>`:"Static"}</td><td>${v.reserved}</td><td>${v.devices}</td></tr>`).join(""):`<tr><td colspan="8">No VLANs defined.</td></tr>`}</tbody></table></section>
+    <section class="report-section"><h3>WAN and routing intent</h3><table><thead><tr><th>Connection</th><th>Transport</th><th>Resilience</th><th>Routing</th><th>Transit</th><th>Prefixes and default</th></tr></thead><tbody>${state.links.length?state.links.map(l=>`<tr><td>${escapeHtml(siteName(l.from))} to ${escapeHtml(siteName(l.to))}</td><td>${escapeHtml(linkLabel(l))}</td><td>${escapeHtml(l.resilience)}</td><td>${escapeHtml(l.routingType)}</td><td>${l.transitAllowed===false?"denied":"allowed"}</td><td>${(l.advertisedPrefixes||[]).map(escapeHtml).join(", ")||"Learned dynamically"}${l.defaultRoute?"; default 0.0.0.0/0":""}</td></tr>`).join(""):`<tr><td colspan="6">No WAN links defined.</td></tr>`}</tbody></table></section>
+    <section class="report-section"><h3>Breakout, hub assignments and inspection</h3><table><thead><tr><th>Site</th><th>Topology role</th><th>Assigned hub</th><th>Internet breakout</th><th>Inspection intent</th></tr></thead><tbody>${breakoutRows||`<tr><td colspan="5">No sites defined.</td></tr>`}</tbody></table></section>
+    <section class="report-section"><h3>Traffic policy matrix</h3><table><thead><tr><th>Source role</th><th>Destination role</th><th>Action</th><th>Rationale</th></tr></thead><tbody>${policyRows||`<tr><td colspan="4">No VLAN roles defined.</td></tr>`}</tbody></table><p>Policy values describe intended trust boundaries. They are not device configuration.</p></section>
+    <section class="report-section"><h3>Assumptions and unresolved decisions</h3>${state.assumptions?.length?`<ul>${state.assumptions.map(a=>`<li>${escapeHtml(a)}</li>`).join("")}</ul>`:"<p>No assumptions documented.</p>"}${unresolved.length?`<ul>${unresolved.map(i=>`<li><strong>${escapeHtml(i.severity.toUpperCase())}:</strong> ${escapeHtml(i.title)}: ${escapeHtml(i.message)}</li>`).join("")}</ul>`:"<p>No unresolved review decisions.</p>"}</section>
+    <section class="report-section"><h3>Schema and review provenance</h3><p><code>${escapeHtml(SCHEMA_ID)} v${SCHEMA_VERSION}</code>. This is a local IPv4 design artifact. A network owner must review addressing, routing and policy before implementation.</p></section>
   </article>`;
 }
 
@@ -353,7 +377,7 @@ function buildRecommendation(){
       const cidr=suggestSiteRange(devices,growth),shell={vlans:[]},vlans=[],occupied=[];
       for(const role of siteRoles(type)){
         const count=roleDevices(role,devices),prefix=prefixForDevices(count,growth),subnet=nextSubnet(cidr,prefix,occupied),vid=conventionalVid(role,shell);
-        const pool=defaultDhcpPool(subnet,1),proposed={id:uid(),name:ROLE_DEFAULTS[role].name,vid,role,devices:count,cidr:subnet,gateway:firstUsable(subnet),dhcpEnabled:!["servers","management"].includes(role),reserved:1,dhcpStart:pool.start,dhcpEnd:pool.end,notes:"Recommended for the new site."};
+        const pool=defaultDhcpPool(subnet,1),proposed=createVlan({id:uid(),name:ROLE_DEFAULTS[role].name,vid,role,devices:count,cidr:subnet,gateway:firstUsable(subnet),dhcpEnabled:!["servers","management"].includes(role),reserved:1,dhcpStart:pool.start,dhcpEnd:pool.end,notes:"Recommended for the new site.",siteCidr:cidr});
         shell.vlans.push(proposed);vlans.push(proposed);occupied.push(subnet);
       }
       pendingRecommendation={kind,id:uid(),name,type,devices,growth,cidr,wan:"single",topologyRole:fd.get("connectTo")?"spoke":"standalone",hubId:fd.get("connectTo")||null,internetBreakout:fd.get("connectTo")?"hub":"local",notes:"Generated by the compatibility assistant.",x:15+(state.sites.length%3)*30,y:18+Math.floor(state.sites.length/3)*32,vlans,connectTo:fd.get("connectTo")};
@@ -361,7 +385,8 @@ function buildRecommendation(){
     }else{
       const site=state.sites.find(s=>s.id===fd.get("vlanSite"));if(!site)throw new Error("Add or select a site before requesting a VLAN");
       const role=fd.get("vlanRole"),devices=Math.max(1,+fd.get("vlanDevices")),vid=conventionalVid(role,site),prefix=prefixForDevices(devices,site.growth),cidr=nextSubnet(site.cidr,prefix,site.vlans.map(v=>v.cidr));
-      pendingRecommendation={kind,siteId:site.id,id:uid(),name:String(fd.get("vlanName")||"").trim()||ROLE_DEFAULTS[role].name,role,devices,vid,cidr,gateway:firstUsable(cidr)};
+      const dhcpEnabled=!(["servers","management"].includes(role)),pool=defaultDhcpPool(cidr,1);
+      pendingRecommendation={kind,siteId:site.id,id:uid(),name:String(fd.get("vlanName")||"").trim()||ROLE_DEFAULTS[role].name,role,devices,vid,cidr,gateway:firstUsable(cidr),dhcpEnabled,reserved:1,dhcpStart:dhcpEnabled?pool.start:"",dhcpEnd:dhcpEnabled?pool.end:"",notes:"Recommended by the compatibility assistant."};
       renderRecommendationPreview();
     }
   }catch(err){pendingRecommendation=null;$("#recommend-preview").className="recommend-preview empty";$("#recommend-preview").textContent="A compatible proposal could not be produced.";$("#recommend-error").textContent=err.message}
@@ -371,12 +396,12 @@ function renderRecommendationPreview(){
   root.className="recommend-preview";
   if(p.kind==="site"){
     const connection=p.connectTo?state.sites.find(s=>s.id===p.connectTo)?.name:"Not connected yet";
-    root.innerHTML=`<div class="proposal-heading"><div><span class="eyebrow">Recommended site plan</span><h3>${escapeHtml(p.name)}</h3></div><code>${p.cidr}</code></div>
+    root.innerHTML=`<div class="proposal-heading"><div><p class="context-label">Recommended site plan</p><h3>${escapeHtml(p.name)}</h3></div><code>${p.cidr}</code></div>
       <div class="proposal-grid">${p.vlans.map(v=>`<div class="proposal-item"><span>VLAN ${v.vid}</span><strong>${escapeHtml(v.name)} · ${v.cidr}</strong></div>`).join("")}</div>
       <ul class="proposal-reasons"><li>${p.cidr} does not overlap any existing site range.</li><li>VLAN IDs follow the conventions already used in this environment where possible.</li><li>Subnet sizes include ${p.growth}% growth and stay inside the site allocation.</li><li>${p.connectTo?`A VPN connection to ${escapeHtml(connection)} will be created.`:"No WAN connection will be assumed."}</li></ul>`;
   }else{
     const site=state.sites.find(s=>s.id===p.siteId);
-    root.innerHTML=`<div class="proposal-heading"><div><span class="eyebrow">Recommended VLAN</span><h3>${escapeHtml(p.name)} at ${escapeHtml(site.name)}</h3></div><code>${p.cidr}</code></div>
+    root.innerHTML=`<div class="proposal-heading"><div><p class="context-label">Recommended VLAN</p><h3>${escapeHtml(p.name)} at ${escapeHtml(site.name)}</h3></div><code>${p.cidr}</code></div>
       <div class="proposal-grid"><div class="proposal-item"><span>VLAN ID</span><strong>${p.vid}</strong></div><div class="proposal-item"><span>Gateway</span><strong>${p.gateway}</strong></div><div class="proposal-item"><span>Devices</span><strong>${p.devices}</strong></div><div class="proposal-item"><span>Role</span><strong>${escapeHtml(p.role)}</strong></div></div>
       <ul class="proposal-reasons"><li>The subnet is free and contained by ${site.cidr}.</li><li>VLAN ${p.vid} follows the environment's ${escapeHtml(p.role)} convention and is unused at this site.</li><li>The prefix includes the site's ${site.growth}% growth allowance.</li></ul>`;
   }
@@ -400,11 +425,11 @@ function applyRecommendation(){
   const p=pendingRecommendation;if(!p)return;
   pushHistory();
   if(p.kind==="site"){
-    const site={id:p.id,name:p.name,type:p.type,devices:p.devices,growth:p.growth,cidr:p.cidr,wan:p.wan,topologyRole:p.topologyRole,hubId:p.hubId,internetBreakout:p.internetBreakout,notes:p.notes,x:p.x,y:p.y,vlans:p.vlans};state.sites.push(site);
-    if(p.connectTo){const hub=state.sites.find(s=>s.id===p.connectTo);state.links.push({id:uid(),from:p.connectTo,to:site.id,type:"vpn",resilience:"single",routingType:"static",transitAllowed:true,defaultRoute:true,advertisedPrefixes:[hub?.cidr,site.cidr].filter(Boolean)})}
+    const site=createSite({id:p.id,name:p.name,type:p.type,devices:p.devices,growth:p.growth,cidr:p.cidr,wan:p.wan,topologyRole:p.topologyRole,hubId:p.hubId,internetBreakout:p.internetBreakout,notes:p.notes,x:p.x,y:p.y,vlans:p.vlans});state.sites.push(site);
+    if(p.connectTo){const hub=state.sites.find(s=>s.id===p.connectTo);state.links.push(createLink({id:uid(),from:p.connectTo,to:site.id,type:"vpn",resilience:"single",routingType:"static",transitAllowed:true,defaultRoute:true,advertisedPrefixes:["0.0.0.0/0",hub?.cidr,site.cidr].filter(Boolean)}))}
     selected={type:"site",id:site.id};showToast(`${site.name} added with ${site.vlans.length} recommended VLANs`);
   }else{
-    const site=state.sites.find(s=>s.id===p.siteId);if(!site)return;site.vlans.push({id:p.id,name:p.name,role:p.role,devices:p.devices,vid:p.vid,cidr:p.cidr,gateway:p.gateway});selected={type:"vlan",id:p.id};showToast(`${p.name} added as ${p.cidr}`);
+    const site=state.sites.find(s=>s.id===p.siteId);if(!site)return;site.vlans.push(createVlan({...p,siteCidr:site.cidr}));selected={type:"vlan",id:p.id};showToast(`${p.name} added as ${p.cidr}`);
   }
   $("#recommend-dialog").close();pendingRecommendation=null;touch();
 }
@@ -431,7 +456,7 @@ $("#hub-form").addEventListener("submit",e=>{
   if(fd.get("createLinks")==="on")for(const spoke of state.sites.filter(s=>!hubIds.includes(s.id)))for(const targetHub of [hub,secondary].filter(Boolean)){
     const existing=state.links.find(l=>(l.from===targetHub.id&&l.to===spoke.id)||(l.to===targetHub.id&&l.from===spoke.id));
     if(existing){existing.transitAllowed=true;if(spoke.internetBreakout==="hub")existing.defaultRoute=true}
-    else state.links.push({id:uid(),from:targetHub.id,to:spoke.id,type:"vpn",resilience:secondary?"dual":"single",routingType:"static",transitAllowed:true,defaultRoute:spoke.internetBreakout==="hub",advertisedPrefixes:[targetHub.cidr,spoke.cidr]});
+    else state.links.push(createLink({id:uid(),from:targetHub.id,to:spoke.id,type:"vpn",resilience:secondary?"dual":"single",routingType:"static",transitAllowed:true,defaultRoute:spoke.internetBreakout==="hub",advertisedPrefixes:[targetHub.cidr,spoke.cidr,...(spoke.internetBreakout==="hub"?["0.0.0.0/0"]:[])]}));
   }
   layoutHubSpoke(hubId,secondaryHubId);selected={type:"site",id:hubId};$("#hub-dialog").close();touch();showToast(`${hub.name}${secondary?` and ${secondary.name}`:""} now serve ${state.sites.length-hubIds.length} spokes`);
 });
@@ -457,8 +482,8 @@ $("#site-form").addEventListener("submit",e=>{
   e.preventDefault();const fd=new FormData(e.currentTarget),name=fd.get("name").trim(),devices=+fd.get("devices"),growth=+fd.get("growth");let cidr=fd.get("cidr").trim()||suggestSiteRange(devices,growth);
   try{cidr=parseCidr(cidr,{allow31:false}).cidr;if(state.sites.some(s=>s.id!==editingSiteId&&rangesOverlap(cidr,s.cidr)))throw new Error("This site range overlaps an existing site allocation");
     pushHistory();
-    if(editingSiteId){const site=state.sites.find(s=>s.id===editingSiteId);Object.assign(site,{name,type:fd.get("type"),devices,cidr,wan:fd.get("wan"),growth,topologyRole:fd.get("topologyRole"),internetBreakout:fd.get("internetBreakout"),notes:fd.get("notes").trim()});selected={type:"site",id:site.id};showToast("Site updated")}
-    else{const index=state.sites.length,stateSite={id:uid(),name,type:fd.get("type"),devices,cidr,wan:fd.get("wan"),growth,topologyRole:fd.get("topologyRole"),hubId:null,internetBreakout:fd.get("internetBreakout"),notes:fd.get("notes").trim(),x:12+(index%3)*31,y:18+Math.floor(index/3)*34,vlans:[]};state.sites.push(stateSite);selected={type:"site",id:stateSite.id};showToast("Site added. Add its existing or proposed VLANs next.")}
+    if(editingSiteId){const site=state.sites.find(s=>s.id===editingSiteId),canonical=createSite({...site,name,type:fd.get("type"),devices,cidr,wan:fd.get("wan"),growth,topologyRole:fd.get("topologyRole"),internetBreakout:fd.get("internetBreakout"),notes:fd.get("notes").trim()});Object.assign(site,canonical,{id:site.id,hubId:site.hubId,x:site.x,y:site.y});selected={type:"site",id:site.id};showToast("Site updated")}
+    else{const index=state.sites.length,stateSite=createSite({id:uid(),name,type:fd.get("type"),devices,cidr,wan:fd.get("wan"),growth,topologyRole:fd.get("topologyRole"),hubId:null,internetBreakout:fd.get("internetBreakout"),notes:fd.get("notes").trim(),x:12+(index%3)*31,y:18+Math.floor(index/3)*34,vlans:[]});state.sites.push(stateSite);selected={type:"site",id:stateSite.id};showToast("Site added. Add its existing or proposed VLANs next.")}
     editingSiteId=null;e.currentTarget.closest("dialog").close();touch();
   }catch(err){$("#site-form-error").textContent=err.message}
 });
@@ -470,11 +495,12 @@ $("#vlan-form").addEventListener("submit",e=>{
     if(!cidr)cidr=nextSubnet(site.cidr,prefixForDevices(devices,site.growth,reserved,{transit:role==="transit"}),site.vlans.filter(v=>v.id!==editingVlanId).map(v=>v.cidr));
     cidr=parseCidr(cidr,{allow31:role==="transit"}).cidr;if(!contains(site.cidr,cidr))throw new Error(`${cidr} is outside the site's ${site.cidr} allocation`);
     if(site.vlans.some(v=>v.id!==editingVlanId&&rangesOverlap(cidr,v.cidr)))throw new Error("This subnet overlaps another VLAN at the site");
-    const dhcpEnabled=fd.get("dhcpEnabled")==="true",automaticPool=defaultDhcpPool(cidr,reserved),dhcpStart=fd.get("dhcpStart").trim()||automaticPool.start,dhcpEnd=fd.get("dhcpEnd").trim()||automaticPool.end;
-    if(dhcpEnabled&&(!validHostInSubnet(dhcpStart,cidr)||!validHostInSubnet(dhcpEnd,cidr)||ipToInt(dhcpStart)>ipToInt(dhcpEnd)))throw new Error("DHCP pool must use valid host addresses inside the VLAN, with start before end");
-    if(dhcpEnabled&&ipToInt(firstUsable(cidr))>=ipToInt(dhcpStart)&&ipToInt(firstUsable(cidr))<=ipToInt(dhcpEnd))throw new Error("DHCP pool must exclude the gateway address");
+    const dhcpEnabled=fd.get("dhcpEnabled")==="true",automaticPool=defaultDhcpPool(cidr,reserved),dhcpStart=fd.get("dhcpStart").trim()||automaticPool.start,dhcpEnd=fd.get("dhcpEnd").trim()||automaticPool.end,gateway=firstUsable(cidr);
+    if(!validateGateway(gateway,cidr,{transit:role==="transit"}))throw new Error("Gateway must be a usable host inside the VLAN subnet");
+    const poolValidation=validateDhcpPool(cidr,gateway,reserved,{enabled:dhcpEnabled,start:dhcpStart,end:dhcpEnd});
+    if(!poolValidation.valid)throw new Error(poolValidation.errors[0]);
     pushHistory();
-    const values={name:fd.get("name").trim(),vid,role,devices,cidr,gateway:firstUsable(cidr),dhcpEnabled,reserved,dhcpStart:dhcpEnabled?dhcpStart:"",dhcpEnd:dhcpEnabled?dhcpEnd:"",notes:fd.get("notes").trim()};
+    const values=createVlan({name:fd.get("name").trim(),vid,role,devices,cidr,gateway,dhcpEnabled,reserved,dhcpStart:dhcpEnabled?dhcpStart:"",dhcpEnd:dhcpEnabled?dhcpEnd:"",notes:fd.get("notes").trim(),siteCidr:site.cidr});
     let v;if(editingVlanId){v=site.vlans.find(x=>x.id===editingVlanId);Object.assign(v,values);showToast(`${v.name} updated`)}else{v={id:uid(),...values};site.vlans.push(v);showToast(`Added ${v.name} as ${v.cidr}`)}
     selected={type:"vlan",id:v.id};editingVlanId=null;e.currentTarget.closest("dialog").close();touch();
   }catch(err){$("#vlan-form-error").textContent=err.message}
@@ -483,8 +509,8 @@ $("#connect-form").addEventListener("submit",e=>{
   e.preventDefault();const fd=new FormData(e.currentTarget),from=fd.get("from"),to=fd.get("to");
   if(from===to)return $("#connect-form-error").textContent="Choose two different sites";
   if(state.links.some(l=>l.id!==editingLinkId&&((l.from===from&&l.to===to)||(l.from===to&&l.to===from))))return $("#connect-form-error").textContent="These sites are already connected";
-  let advertisedPrefixes;try{advertisedPrefixes=String(fd.get("advertisedPrefixes")||"").split(",").map(x=>x.trim()).filter(Boolean).map(x=>parseCidr(x).cidr)}catch(err){return $("#connect-form-error").textContent=`Advertised prefix: ${err.message}`}
-  pushHistory();const values={from,to,type:fd.get("type"),resilience:fd.get("resilience"),routingType:fd.get("routingType"),transitAllowed:fd.get("transitAllowed")==="true",defaultRoute:fd.get("defaultRoute")==="on",advertisedPrefixes};
+  let advertisedPrefixes;try{advertisedPrefixes=String(fd.get("advertisedPrefixes")||"").split(",").map(x=>x.trim()).filter(Boolean).map(x=>parseRoutePrefix(x).cidr)}catch(err){return $("#connect-form-error").textContent=`Advertised prefix: ${err.message}`}
+  pushHistory();const values=createLink({from,to,type:fd.get("type"),resilience:fd.get("resilience"),routingType:fd.get("routingType"),transitAllowed:fd.get("transitAllowed")==="true",defaultRoute:fd.get("defaultRoute")==="on",advertisedPrefixes});
   let l;if(editingLinkId){l=state.links.find(x=>x.id===editingLinkId);Object.assign(l,values);showToast("Connection updated")}else{l={id:uid(),...values};state.links.push(l);showToast("Connection added")}editingLinkId=null;selected={type:"link",id:l.id};e.currentTarget.closest("dialog").close();touch();
 });
 $("#name-form").addEventListener("submit",e=>{e.preventDefault();pushHistory();const fd=new FormData(e.currentTarget);state.name=fd.get("name").trim();state.assumptions=fd.get("assumptions").split("\n").map(x=>x.trim()).filter(Boolean);$("#name-dialog").close();touch()});
@@ -501,7 +527,7 @@ document.addEventListener("click",e=>{
   if(e.target.closest("#new-project"))return newProject();
   if(e.target.closest("#print-report"))return window.print();
   const openProject=e.target.closest("[data-open-project]");if(openProject){const project=loadLibrary()[openProject.dataset.openProject];if(project){state=migrateDesign(project);selected=null;undoStack=[];redoStack=[];saveState();$("#projects-dialog").close();enterWorkspace();render();showToast(`${state.name} opened`)}return}
-  const deleteProject=e.target.closest("[data-delete-project]");if(deleteProject&&confirm("Delete this locally saved design?")){const library=loadLibrary();delete library[deleteProject.dataset.deleteProject];localStorage.setItem(LIBRARY_KEY,JSON.stringify(library));renderProjectLibrary();showToast("Design deleted");return}
+  const deleteProject=e.target.closest("[data-delete-project]");if(deleteProject&&confirm("Delete this locally saved design?")){const library=loadLibrary();delete library[deleteProject.dataset.deleteProject];storageSet(LIBRARY_KEY,JSON.stringify(library));renderProjectLibrary();showToast("Design deleted");return}
   const recommendVlan=e.target.closest("[data-recommend-vlan]");if(recommendVlan)return openRecommendDialog("vlan",recommendVlan.dataset.recommendVlan);
   const recommendKind=e.target.closest("[data-recommend-kind]");if(recommendKind)return setRecommendationKind(recommendKind.dataset.recommendKind);
   if(e.target.closest("#refresh-recommendation"))return buildRecommendation();
@@ -517,7 +543,7 @@ document.addEventListener("click",e=>{
   const site=e.target.closest("[data-site]");if(site&&!e.target.closest("[data-add-vlan]")){selected={type:"site",id:site.dataset.site};$(".tool-panel").classList.remove("mobile-open");render();return}
   const vlanEl=e.target.closest("[data-vlan]");if(vlanEl){selected={type:"vlan",id:vlanEl.dataset.vlan};render();return}
   const link=e.target.closest("[data-link]");if(link){selected={type:"link",id:link.dataset.link};render();return}
-  const view=e.target.closest("[data-view]");if(view){$$("[data-view]").forEach(b=>b.classList.toggle("active",b===view));$$(".view").forEach(v=>v.classList.toggle("active",v.id===`${view.dataset.view}-view`));return}
+  const view=e.target.closest("[data-view]");if(view){activateView(view.dataset.view);return}
   const tool=e.target.closest("[data-tool]");if(tool){currentTool=tool.dataset.tool;$$("[data-tool]").forEach(b=>b.classList.toggle("active",b===tool));if(currentTool==="connect")openConnectDialog(selected?.type==="site"?selected.id:null);if(currentTool==="trace")openTraceDialog();return}
   if(e.target.closest("#project-name-button")){$("#name-form").elements.name.value=state.name;$("#name-form").elements.assumptions.value=(state.assumptions||[]).join("\n");$("#name-dialog").showModal();return}
   if(e.target.closest("#export-button"))return exportDesign();
@@ -535,38 +561,48 @@ document.addEventListener("click",e=>{
   if(e.target.closest("#close-trace"))return stopTrace();
   if(e.target.closest("#rerun-review")){renderReview();showToast("Design review updated")}
 });
-document.addEventListener("keydown",e=>{const node=e.target.closest?.(".topology-node");if(node&&["Enter"," "].includes(e.key)){e.preventDefault();selected={type:"site",id:node.dataset.site};render()}});
+document.addEventListener("keydown",e=>{
+  const node=e.target.closest?.(".topology-node"),row=e.target.closest?.(".site-row,.vlan-row");
+  if((node||row)&&["Enter"," "].includes(e.key)){e.preventDefault();selected=node?{type:"site",id:node.dataset.site}:row.dataset.vlan?{type:"vlan",id:row.dataset.vlan}:{type:"site",id:row.dataset.site};render();return}
+  const tab=e.target.closest?.('[role="tab"]');if(tab&&["ArrowRight","ArrowDown","ArrowLeft","ArrowUp","Home","End"].includes(e.key)){e.preventDefault();const tabs=$$('[role="tab"]'),index=tabs.indexOf(tab),next=e.key==="Home"?0:e.key==="End"?tabs.length-1:e.key.includes("Right")||e.key.includes("Down")?(index+1)%tabs.length:(index-1+tabs.length)%tabs.length;activateView(tabs[next].dataset.view,true)}
+});
 $("#recommend-form").addEventListener("submit",e=>e.preventDefault());
 $("#recommend-form").addEventListener("input",()=>{clearTimeout(buildRecommendation.timer);buildRecommendation.timer=setTimeout(buildRecommendation,180)});
 $("#recommend-form").addEventListener("change",()=>buildRecommendation());
 
 $("#file-input").addEventListener("change",async e=>{
-  const file=e.target.files[0];if(!file)return;try{const text=await file.text(),raw=file.name.toLowerCase().endsWith(".csv")?designFromCsv(text):JSON.parse(text),imported=migrateDesign(raw);pushHistory();state=imported;state.mode="imported";selected=null;saveState();enterWorkspace();render();showToast(`${file.name.toLowerCase().endsWith(".csv")?"CSV":"Design"} imported and validated`)}catch(err){showToast(`Import failed: ${err.message}`)}e.target.value="";
+  const file=e.target.files[0];if(!file)return;try{const text=await file.text(),raw=file.name.toLowerCase().endsWith(".csv")?designFromCsv(text):JSON.parse(text),imported=file.name.toLowerCase().endsWith(".csv")?raw:migrateDesign(raw,{strict:true});pushHistory();state=imported;state.mode="imported";selected=null;saveState();enterWorkspace();render();showToast(`${file.name.toLowerCase().endsWith(".csv")?"CSV":"Design"} imported and validated`)}catch(err){showToast(`Import failed: ${err.message}`)}e.target.value="";
 });
 function parseCsvLine(line){
   const values=[];let value="",quoted=false;
   for(let i=0;i<line.length;i++){const c=line[i];if(c==='"'&&quoted&&line[i+1]==='"'){value+='"';i++}else if(c==='"')quoted=!quoted;else if(c===","&&!quoted){values.push(value);value=""}else value+=c}values.push(value);return values;
 }
 function designFromCsv(text){
-  const lines=text.replace(/^\uFEFF/,"").split(/\r?\n/).filter(Boolean);if(lines.length<2)throw new Error("CSV must include a header and at least one VLAN");
-  const headers=parseCsvLine(lines[0]).map(h=>h.trim().toLowerCase()),required=["site","site range","vlan","subnet"];
+  const lines=text.replace(/^\uFEFF/,"").split(/\r?\n/).filter(line=>line.trim());if(lines.length<2)throw new Error("CSV must include a header and at least one address record");
+  const headers=parseCsvLine(lines[0]).map(h=>h.trim().toLowerCase()),required=headers.includes("record type")?["record type","site range"]:["site","site range","vlan","subnet"];
   if(required.some(h=>!headers.includes(h)))throw new Error(`CSV requires columns: ${required.join(", ")}`);
-  const records=lines.slice(1).map(line=>Object.fromEntries(parseCsvLine(line).map((value,i)=>[headers[i],value.trim()]))),sites=[];
+  const decode=(value,key)=>{const textValue=String(value??"").trim();if(!textValue)return"";if(["policies","flow policies","assumptions","links"].includes(key)){try{return JSON.parse(textValue)}catch{throw new Error(`CSV ${key} metadata is not valid JSON`)}}if(key==="site notes"||key==="vlan notes"){try{return JSON.parse(textValue)}catch{return textValue}}return textValue};
+  const records=lines.slice(1).map(line=>Object.fromEntries(parseCsvLine(line).map((value,index)=>[headers[index],decode(value,headers[index])]))) ,sites=[],siteById=new Map();let metadata=null;
   for(const record of records){
-    let site=sites.find(s=>s.name===record.site);
-    if(!site){site={id:uid(),name:record.site||"Imported site",type:"office",cidr:record["site range"],devices:0,wan:"single",growth:30,topologyRole:record.role||"standalone",hubId:null,internetBreakout:"local",notes:"Imported from CSV",x:12+(sites.length%3)*31,y:18+Math.floor(sites.length/3)*34,vlans:[]};sites.push(site)}
-    const devices=Math.max(1,Number(record.devices||1)),cidr=parseCidr(record.subnet).cidr;site.devices+=devices;site.vlans.push({id:uid(),name:record["vlan name"]||record.purpose||`VLAN ${record.vlan}`,vid:Number(record.vlan),role:record.purpose||"other",devices,cidr,gateway:record.gateway||firstUsable(cidr),dhcpEnabled:String(record.dhcp||"enabled").toLowerCase()!=="disabled",reserved:Math.max(1,Number(record.reserved||1)),notes:""});
+    if(record["record type"]==="design")metadata=record;
+    const siteKey=record["site id"]||record.site||uid();
+    if(!record.site&&record["record type"]==="design")continue;
+    let site=siteById.get(siteKey);
+    if(!site){const index=sites.length;site={id:siteKey,name:record.site||"Imported site",type:record["site type"]||"office",cidr:record["site range"],devices:Number(record["site devices"]||record.devices||1),wan:record.wan||"single",growth:Number(record.growth||30),topologyRole:record["site role"]||record.role||"standalone",hubId:record["hub id"]||null,internetBreakout:record["internet breakout"]||"local",notes:record["site notes"]||"Imported from CSV",x:12+(index%3)*31,y:18+Math.floor(index/3)*34,vlans:[]};sites.push(site);siteById.set(siteKey,site)}
+    if(!headers.includes("record type")||record["record type"]==="vlan"||record.subnet){const vlanObjectId=record["vlan id"],vlanId=record.vlan||vlanObjectId;if(!vlanId)continue;const cidr=parseCidr(record.subnet).cidr,devices=Math.max(1,Number(record.devices||1)),reserved=Math.max(1,Number(record.reserved||1)),dhcpEnabled=String(record.dhcp||"enabled").toLowerCase()!=="disabled",automatic=defaultDhcpPool(cidr,reserved),start=dhcpEnabled?(record["dhcp start"]||automatic.start):"",end=dhcpEnabled?(record["dhcp end"]||automatic.end):"";site.vlans.push(createVlan({id:vlanObjectId&&/^[A-Za-z0-9_-]{1,80}$/.test(vlanObjectId)?vlanObjectId:uid(),name:record["vlan name"]||record.purpose||`VLAN ${vlanId}`,vid:Number(vlanId),role:record.purpose||"other",devices,cidr,gateway:record.gateway||firstUsable(cidr),dhcpEnabled,reserved,dhcpStart:start,dhcpEnd:end,notes:record["vlan notes"]||"",siteCidr:site.cidr}));}
   }
-  return{version:2,name:"Imported address plan",mode:"imported",topologyMode:"custom",policies:{spokeToSpoke:"via-hub",centralizedInspection:false},flowPolicies:{},assumptions:["Imported from CSV; confirm site types, WAN design and routing."],sites,links:[]};
+  const raw={schema:SCHEMA_ID,version:SCHEMA_VERSION,projectId:metadata?.["project id"]||uid(),name:metadata?.["project name"]||"Imported address plan",mode:"imported",topologyMode:metadata?.["topology mode"]||"custom",policies:metadata?.policies||{spokeToSpoke:"via-hub",centralizedInspection:false,secondaryHubId:null},flowPolicies:metadata?.["flow policies"]||{},assumptions:metadata?.assumptions||["Imported from CSV; confirm site types, WAN design and routing."],sites,links:metadata?.links||[]};
+  return migrateDesign(raw,{strict:true});
 }
 
 function exportDesign(){
   const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`${state.name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")||"network-design"}.json`;a.click();URL.revokeObjectURL(a.href);showToast("Design exported");
 }
 function exportCsv(){
-  const rows=[["Site","Role","Site range","VLAN","VLAN name","Purpose","Subnet","Gateway","Devices","Endpoint capacity","DHCP","DHCP start","DHCP end","Reserved"]];
-  for(const site of state.sites)for(const v of site.vlans)rows.push([site.name,site.topologyRole,site.cidr,v.vid,v.name,v.role,v.cidr,v.gateway,v.devices,safeCapacity(v),v.dhcpEnabled?"enabled":"disabled",v.dhcpStart||"",v.dhcpEnd||"",v.reserved??1]);
-  const csv=rows.map(row=>row.map(value=>`"${String(value).replaceAll('"','""')}"`).join(",")).join("\n"),blob=new Blob([csv],{type:"text/csv"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`${state.name.toLowerCase().replace(/[^a-z0-9]+/g,"-")||"network"}-address-plan.csv`;a.click();URL.revokeObjectURL(a.href);showToast("Address plan exported as CSV");
+  const headers=["Record type","Project ID","Project name","Mode","Topology mode","Policies","Flow policies","Assumptions","Links","Site ID","Site","Site type","Site range","Site devices","WAN","Growth","Site role","Hub ID","Internet breakout","Site notes","VLAN ID","VLAN","VLAN name","Purpose","Subnet","Gateway","Devices","Endpoint capacity","DHCP","DHCP start","DHCP end","Reserved","VLAN notes"],rows=[headers],metadata=[state.projectId,state.name,state.mode||"",state.topologyMode,JSON.stringify(state.policies||{}),JSON.stringify(state.flowPolicies||{}),JSON.stringify(state.assumptions||[]),JSON.stringify(state.links||[])];
+  for(const site of state.sites){for(const v of site.vlans)rows.push(["vlan",...metadata,site.id,site.name,site.type,site.cidr,site.devices,site.wan,site.growth,site.topologyRole,site.hubId||"",site.internetBreakout,JSON.stringify(site.notes||""),v.id,v.vid,v.name,v.role,v.cidr,v.gateway,v.devices,safeCapacity(v),v.dhcpEnabled?"enabled":"disabled",v.dhcpStart||"",v.dhcpEnd||"",v.reserved??1,JSON.stringify(v.notes||"")]);if(!site.vlans.length)rows.push(["site",...metadata,site.id,site.name,site.type,site.cidr,site.devices,site.wan,site.growth,site.topologyRole,site.hubId||"",site.internetBreakout,JSON.stringify(site.notes||""),...Array(13).fill("")]);}
+  if(!state.sites.length)rows.push(["design",...metadata,...Array(23).fill("")]);
+  const csv=rows.map(row=>row.map(value=>`"${String(value??"").replaceAll('"','""')}"`).join(",")).join("\n"),blob=new Blob([csv],{type:"text/csv"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`${state.name.toLowerCase().replace(/[^a-z0-9]+/g,"-")||"network"}-address-plan.csv`;a.click();URL.revokeObjectURL(a.href);showToast("Address plan exported as CSV");
 }
 function startTraceSelection(){
   if(!state.links.length)return showToast("Connect two sites before tracing a path");
@@ -603,5 +639,7 @@ function findVlan(id){for(const site of state.sites){const vlan=site.vlans.find(
 function safeParse(cidr){try{return parseCidr(cidr)}catch{return null}}
 function safeCapacity(vlan){try{return endpointCapacity(vlan.cidr,Number(vlan.reserved??1))}catch{return 0}}
 function escapeHtml(value){return String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function roleClass(role){return ENUMS.vlanRoles.includes(role)?`role-${role}`:"role-other"}
 
-enterWorkspace();render();
+activateView("topology");enterWorkspace();render();
+if(storageIssue) showToast(storageIssue);

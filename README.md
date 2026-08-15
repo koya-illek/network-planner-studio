@@ -3,6 +3,9 @@
 An IPv4-only network design workbench for modelling existing environments and
 planning new sites, VLANs and WAN connections.
 
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the local-first component model,
+data flow, privacy boundary, deployment topology, and external dependencies.
+
 ## Product principles
 
 - Existing address space is entered without being silently changed.

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   parseCidr,rangesOverlap,contains,endpointCapacity,prefixForDevices,nextSubnet,
-  suggestSiteRange,isPrivateCidr,shortestPath,migrateDesign,defaultDhcpPool,validHostInSubnet
+  suggestSiteRange,isPrivateCidr,isPrivateRoutePrefix,shortestPath,migrateDesign,defaultDhcpPool,validHostInSubnet,parseRoutePrefix,validateGateway,validateDhcpPool,validateDesign,SCHEMA_ID,SCHEMA_VERSION
 } from "../public/network-core.js";
 
 test("parses LAN and point-to-point IPv4 networks",()=>{
@@ -74,7 +74,7 @@ test("bounds malformed imported numeric fields to finite values",()=>{
     id:"bounded",devices:999999,growth:-5,x:-10,y:999,vlans:[
       {id:"v",vid:9999,devices:999999,reserved:9999,cidr:"10.1.0.0/24"}
     ]
-  }],links:[]});
+  }],links:[]},{strict:false});
   const boundedSite=bounded.sites[0],boundedVlan=boundedSite.vlans[0];
   assert.deepEqual({devices:boundedSite.devices,growth:boundedSite.growth,x:boundedSite.x,y:boundedSite.y},{devices:50000,growth:0,x:0,y:100});
   assert.deepEqual({vid:boundedVlan.vid,devices:boundedVlan.devices,reserved:boundedVlan.reserved},{vid:4094,devices:65534,reserved:1000});
@@ -82,7 +82,7 @@ test("bounds malformed imported numeric fields to finite values",()=>{
 
 test("migrates v1 designs and removes dangling links",()=>{
   const result=migrateDesign({version:1,name:"Old",sites:[{id:"a",name:"A",vlans:[]}],links:[{id:"x",from:"a",to:"missing"}]});
-  assert.equal(result.version,2);
+  assert.equal(result.version,3);
   assert.equal(result.sites[0].topologyRole,"standalone");
   assert.ok(result.projectId);
   assert.equal(result.links.length,0);
@@ -92,4 +92,36 @@ test("sanitizes imported DOM identifiers while preserving links",()=>{
   const result=migrateDesign({sites:[{id:'a\" onclick=\"bad()',name:"A",vlans:[]},{id:"b",name:"B",vlans:[]}],links:[{id:"l",from:'a\" onclick=\"bad()',to:"b"}]});
   assert.match(result.sites[0].id,/^[A-Za-z0-9_-]+$/);
   assert.equal(result.links[0].from,result.sites[0].id);
+});
+
+test("keeps route-prefix validation separate from allocation CIDRs",()=>{
+  assert.throws(()=>parseCidr("0.0.0.0/0"),/between/);
+  assert.equal(parseRoutePrefix("0.0.0.0/0").cidr,"0.0.0.0/0");
+  assert.equal(parseRoutePrefix("192.0.2.1/32").cidr,"192.0.2.1/32");
+  assert.equal(isPrivateRoutePrefix("10.20.0.0/16"),true);
+  assert.equal(isPrivateRoutePrefix("0.0.0.0/0"),false);
+});
+
+test("rejects invalid gateway, reservation and pool combinations",()=>{
+  assert.equal(validateGateway("10.40.10.1","10.40.10.0/24"),true);
+  assert.equal(validateGateway("10.40.11.1","10.40.10.0/24"),false);
+  const conflict=validateDhcpPool("10.40.10.0/24","10.40.10.1",5,{enabled:true,start:"10.40.10.2",end:"10.40.10.50"});
+  assert.equal(conflict.valid,false);
+  assert.match(conflict.errors.join(" "),/reserved/);
+});
+
+test("strict migration rejects hostile structural values and validates canonical schema",()=>{
+  const input={schema:SCHEMA_ID,version:SCHEMA_VERSION,sites:[{id:"site",name:"HQ",type:"office",cidr:"10.40.0.0/16",devices:1,wan:"single",growth:30,x:1,y:1,topologyRole:"standalone",internetBreakout:"local",vlans:[{id:"vlan",name:"Staff",vid:10,role:"users",devices:1,cidr:"10.40.10.0/24",gateway:"192.0.2.1",dhcpEnabled:true,reserved:1,dhcpStart:"10.40.10.2",dhcpEnd:"10.40.10.254"}]}],links:[],topologyMode:"custom",policies:{spokeToSpoke:"via-hub",centralizedInspection:false},flowPolicies:{}};
+  assert.throws(()=>migrateDesign(input),/Gateway must be/);
+  const valid={...input,sites:[{...input.sites[0],vlans:[{...input.sites[0].vlans[0],gateway:"10.40.10.1",dhcpStart:"10.40.10.2",dhcpEnd:"10.40.10.254"}]}]};
+  const migrated=migrateDesign(valid);
+  assert.equal(migrated.schema,SCHEMA_ID);assert.equal(migrated.version,SCHEMA_VERSION);assert.equal(validateDesign(migrated).valid,true);
+});
+
+test("allocation and migration remain finite across generated boundary values",()=>{
+  for(let prefix=8;prefix<=31;prefix++){
+    const parsed=parseCidr(`10.0.0.0/${prefix}`);
+    assert.ok(Number.isFinite(parsed.network)&&Number.isFinite(parsed.broadcast));
+    assert.ok(parsed.cidr.endsWith(`/${prefix}`));
+  }
 });
