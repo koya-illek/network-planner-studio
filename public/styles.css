@@ -115,6 +115,31 @@ textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(77,163,255,.2)
 @media(max-width:720px){.report-page,#implementation-report,.report-sheet{min-width:0;max-width:100%;width:100%;box-sizing:border-box}.report-page{overflow:hidden}.report-sheet{padding:16px}.report-header{display:block}.report-status{margin-top:10px}.report-section{max-width:100%;overflow-x:auto}.report-kpis{grid-template-columns:1fr 1fr}.project-card{grid-template-columns:1fr}.project-card-actions{flex-wrap:wrap}}
 @media print{body{background:#fff;color:#111}.topbar,.view-tabs,.no-print,.tool-panel,.inspector,.toast{display:none!important}.workspace,.view,.page-view{display:block!important;padding:0!important}.view:not(#report-view){display:none!important}.report-sheet{border:0;background:#fff;color:#111;max-width:none;padding:0}.report-sheet table,.report-sheet th,.report-sheet td{color:#111;background:#fff;border-color:#bbb}.report-kpi{background:#eee}.report-sheet small,.report-sheet span,.report-sheet ul{color:#333}}
 
+/* Command hierarchy and touch ergonomics */
+.top-actions>.button,.utility-menu>summary{min-height:44px;display:inline-flex;align-items:center;justify-content:center}
+.utility-menu{position:relative}
+.utility-menu>summary{list-style:none}
+.utility-menu>summary::-webkit-details-marker{display:none}
+.utility-menu-panel{position:absolute;right:0;top:calc(100% + 8px);z-index:60;display:grid;width:210px;padding:8px;background:var(--cream);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
+.utility-menu-panel .button{min-height:44px;display:flex!important;align-items:center;justify-content:flex-start;width:100%;border-color:transparent;text-decoration:none}
+.utility-menu-panel .button:hover{border-color:var(--line);transform:none}
+.utility-menu-panel #projects-button{color:var(--blue)}
+.utility-menu-panel #import-button{margin-top:5px;border-top-color:var(--line);border-radius:0}
+.sample-link{min-height:44px;display:inline-flex;align-items:center}
+.view-tabs button{min-height:44px;padding-top:12px;padding-bottom:9px}
+.mode-group button{min-height:42px}
+.zoom-controls button{min-width:42px;height:42px}
+
+@media(max-width:1050px){
+  .utility-menu-panel a.button{display:flex!important}
+}
+
+@media(max-width:720px){
+  .top-actions>.home-button,.top-actions>.recommend-button{display:none}
+  .utility-menu-panel{position:fixed;top:60px;right:8px;width:min(260px,calc(100vw - 16px))}
+  .utility-menu-panel #undo-button,.utility-menu-panel #redo-button,.utility-menu-panel #import-button,.utility-menu-panel #export-button{display:flex!important}
+}
+
 /* Responsive landing and semantic heading refinements */
 @media(max-width:1050px){
   .welcome{gap:42px;padding:64px clamp(24px,7vw,72px)}

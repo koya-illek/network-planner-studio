@@ -188,7 +188,7 @@ function renderInspector(){
       <div class="inspector-actions"><button class="button ghost" data-edit-vlan="${v.id}" type="button">Edit</button><button class="button ghost" data-delete-vlan="${v.id}" type="button">Delete VLAN</button></div></div>`;
   } else {
     const l=state.links.find(x=>x.id===selected.id),a=l&&state.sites.find(s=>s.id===l.from),b=l&&state.sites.find(s=>s.id===l.to);if(!l||!a||!b){selected=null;return renderInspector()}
-    root.innerHTML=`<div class="inspector-content"><p class="context-label">WAN connection</p><h2>${escapeHtml(a.name)} to ${escapeHtml(b.name)}</h2><p>${linkLabel(l)} with ${l.resilience==="dual"?"redundant paths":"a single path"}.</p><div class="detail-grid"><div class="detail"><span>Type</span><strong>${linkLabel(l)}</strong></div><div class="detail"><span>Resilience</span><strong>${l.resilience}</strong></div><div class="detail"><span>Routing</span><strong>${l.routingType||"static"}</strong></div><div class="detail"><span>Transit</span><strong>${l.transitAllowed===false?"blocked":"allowed"}</strong></div></div><div class="inspector-actions"><button class="button primary" data-trace-link="${l.id}" type="button">Trace path</button><button class="button ghost" data-edit-link="${l.id}" type="button">Edit</button><button class="button ghost" data-delete-link="${l.id}" type="button">Delete</button></div></div>`;
+    root.innerHTML=`<div class="inspector-content"><p class="context-label">WAN connection</p><h2>${escapeHtml(a.name)} to ${escapeHtml(b.name)}</h2><p>${linkLabel(l)} with ${l.resilience==="dual"?"redundant paths":"a single path"}.</p><div class="detail-grid"><div class="detail"><span>Type</span><strong>${linkLabel(l)}</strong></div><div class="detail"><span>Resilience</span><strong>${escapeHtml(l.resilience)}</strong></div><div class="detail"><span>Routing</span><strong>${escapeHtml(l.routingType||"static")}</strong></div><div class="detail"><span>Transit</span><strong>${l.transitAllowed===false?"blocked":"allowed"}</strong></div></div><div class="inspector-actions"><button class="button primary" data-trace-link="${l.id}" type="button">Trace path</button><button class="button ghost" data-edit-link="${l.id}" type="button">Edit</button><button class="button ghost" data-delete-link="${l.id}" type="button">Delete</button></div></div>`;
   }
 }
 function connectionsFor(id){return state.links.filter(l=>l.from===id||l.to===id).length}
@@ -516,6 +516,9 @@ $("#connect-form").addEventListener("submit",e=>{
 $("#name-form").addEventListener("submit",e=>{e.preventDefault();pushHistory();const fd=new FormData(e.currentTarget);state.name=fd.get("name").trim();state.assumptions=fd.get("assumptions").split("\n").map(x=>x.trim()).filter(Boolean);$("#name-dialog").close();touch()});
 
 document.addEventListener("click",e=>{
+  const utilityMenu=$("#utility-menu"),utilityCommand=e.target.closest("#utility-menu .utility-menu-panel button,#utility-menu .utility-menu-panel a");
+  if(utilityMenu?.open&&!utilityMenu.contains(e.target))utilityMenu.open=false;
+  if(utilityCommand&&!utilityCommand.disabled)queueMicrotask(()=>{utilityMenu.open=false});
   const closeDialog=e.target.closest("[data-close-dialog]");if(closeDialog)return closeDialog.closest("dialog").close();
   if(e.target.closest("#home-button,.brand")){e.preventDefault();return showHome()}
   if(e.target.closest("#continue-design")){state.mode=state.mode||"existing";saveState();enterWorkspace();render();return}

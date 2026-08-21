@@ -22,6 +22,8 @@ test("existing sites, VLANs and path tracing are present", async () => {
   assert.match(app, /contains/);
   assert.match(html, /Implementation report/);
   assert.match(html, /Your designs/);
+  assert.match(html, /Project and file commands/);
+  assert.match(html, /<summary class="button ghost">More<\/summary>/);
 });
 
 test("worker exposes health and hardened assets", async () => {
@@ -31,7 +33,9 @@ test("worker exposes health and hardened assets", async () => {
   assert.match(worker, /Content-Security-Policy/);
   assert.ok(worker.includes("static.cloudflareinsights.com"));
   assert.ok(headers.includes("Content-Security-Policy"));
-  assert.ok(headers.includes("Strict-Transport-Security"));
+  const hsts="max-age=31536000; includeSubDomains; preload";
+  assert.ok(worker.includes(hsts));
+  assert.ok(headers.includes(hsts));
   assert.match(worker, /env\.ASSETS\.fetch/);
   assert.match(worker, /X-Robots-Tag/);
   const wrangler = await readFile(new URL("wrangler.toml", root), "utf8");

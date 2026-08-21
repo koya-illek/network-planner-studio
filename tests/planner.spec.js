@@ -35,7 +35,9 @@ test("editing a VLAN can be undone and redone", async ({ page }) => {
   await page.locator("#vlan-form input[name=devices]").fill("110");
   await page.locator("#vlan-form button[type=submit]").click();
   await expect(page.locator("#undo-button")).toBeEnabled();
+  await page.locator("#utility-menu > summary").click();
   await page.locator("#undo-button").click();
+  await page.locator("#utility-menu > summary").click();
   await page.locator("#redo-button").click();
   const stored=await page.evaluate(()=>JSON.parse(localStorage.getItem("network-planner-studio.v1")));
   expect(stored.sites[0].vlans[0].devices).toBe(110);
@@ -56,6 +58,7 @@ test("imports a validated CSV address plan", async ({ page }) => {
 });
 
 test("duplicates and reopens local projects", async ({ page }) => {
+  await page.locator("#utility-menu > summary").click();
   await page.locator("#projects-button").click();
   await page.locator("#duplicate-project").click();
   await expect(page.locator(".project-card")).toHaveCount(2);

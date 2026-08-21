@@ -32,6 +32,12 @@ test("legacy netplanner alias uses one-hop canonical HTTPS redirect", () => {
   assert.equal(response.headers.get("location"), "https://network.illek.ie/api/health?check=1");
 });
 
+test("HTTPS requests to the legacy alias also canonicalize to network", () => {
+  const response = redirectForRequest(new Request("https://netplanner.illek.ie/?plan=x"));
+  assert.equal(response.status, 301);
+  assert.equal(response.headers.get("location"), "https://network.illek.ie/?plan=x");
+});
+
 test("canonical HTTPS network requests are not redirected", () => {
   assert.equal(redirectForRequest(new Request("https://network.illek.ie/")), null);
 });

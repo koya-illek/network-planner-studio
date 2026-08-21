@@ -94,6 +94,13 @@ test("sanitizes imported DOM identifiers while preserving links",()=>{
   assert.equal(result.links[0].from,result.sites[0].id);
 });
 
+test("clamps hostile imported link enums so rendered values stay inert",()=>{
+  const result=migrateDesign({sites:[{id:"a",name:"A",vlans:[]},{id:"b",name:"B",vlans:[]}],links:[{id:"l",from:"a",to:"b",type:"<script>",resilience:"><img src=x onerror=alert(1)>",routingType:"static;drop"}]},{strict:false});
+  const link=result.links[0];
+  assert.deepEqual({type:link.type,resilience:link.resilience,routingType:link.routingType},{type:"vpn",resilience:"single",routingType:"static"});
+  assert.deepEqual(validateDesign(result,{allowIncomplete:true}).errors.filter(e=>e.code==="invalid-enum"),[]);
+});
+
 test("keeps route-prefix validation separate from allocation CIDRs",()=>{
   assert.throws(()=>parseCidr("0.0.0.0/0"),/between/);
   assert.equal(parseRoutePrefix("0.0.0.0/0").cidr,"0.0.0.0/0");
