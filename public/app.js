@@ -85,8 +85,9 @@ function saveState(){
 function pushHistory(){
   undoStack.push(JSON.stringify(state));if(undoStack.length>40)undoStack.shift();redoStack=[];updateHistoryButtons();
 }
+function reviveDesign(raw){try{return migrateDesign(raw)}catch{return migrateDesign(raw,{strict:false})}}
 function restoreHistory(source,target){
-  if(!source.length)return;target.push(JSON.stringify(state));state=migrateDesign(JSON.parse(source.pop()));selected=null;saveState();render();updateHistoryButtons();
+  if(!source.length)return;target.push(JSON.stringify(state));state=reviveDesign(JSON.parse(source.pop()));selected=null;saveState();render();updateHistoryButtons();
 }
 function updateHistoryButtons(){
   $("#undo-button").disabled=!undoStack.length;$("#redo-button").disabled=!redoStack.length;
@@ -324,15 +325,17 @@ function renderProjectLibrary(){
 }
 function openProjects(){saveState();renderProjectLibrary();$("#projects-dialog").showModal()}
 function duplicateProject(){
-  saveState();state=migrateDesign(JSON.parse(JSON.stringify(state)));state.projectId=uid();state.name=`${state.name} copy`;state.mode=state.mode||"existing";undoStack=[];redoStack=[];saveState();renderProjectLibrary();render();showToast("Design duplicated");
+  saveState();state=reviveDesign(JSON.parse(JSON.stringify(state)));state.projectId=uid();state.name=`${state.name} copy`;state.mode=state.mode||"existing";undoStack=[];redoStack=[];saveState();renderProjectLibrary();render();showToast("Design duplicated");
 }
 function newProject(){state=blankState();state.mode="new";selected=null;undoStack=[];redoStack=[];saveState();$("#projects-dialog").close();enterWorkspace();render();openSiteDialog()}
 
 function openSiteDialog(siteId=null){
-  editingSiteId=siteId;const form=$("#site-form");form.reset();form.elements.devices.value=50;form.elements.growth.value=30;
+  editingSiteId=siteId;const form=$("#site-form");form.reset();form.elements.devices.value=50;
+  const growth=form.elements.growth;growth.querySelector("option[data-dynamic-growth]")?.remove();growth.value=30;
   const site=siteId&&state.sites.find(s=>s.id===siteId);
   $("#site-dialog-title").textContent=site?"Edit site":"Add a site";$("#site-submit").textContent=site?"Save changes":"Add site";
-  if(site)for(const key of ["name","type","devices","cidr","wan","growth","topologyRole","internetBreakout","notes"])if(form.elements[key])form.elements[key].value=site[key]??"";
+  if(site){for(const key of ["name","type","devices","cidr","wan","growth","topologyRole","internetBreakout","notes"])if(form.elements[key])form.elements[key].value=site[key]??"";
+    if(growth.value!==String(site.growth)){const option=document.createElement("option");option.value=String(site.growth);option.textContent=`${site.growth}% (from design)`;option.dataset.dynamicGrowth="";growth.add(option);growth.value=String(site.growth)}}
   $("#site-form-error").textContent="";$("#site-dialog").showModal();setTimeout(()=>form.elements.name.focus(),50);
 }
 function openVlanDialog(siteId,vlanId=null){
@@ -540,7 +543,7 @@ document.addEventListener("click",e=>{
   if(e.target.closest("#duplicate-project"))return duplicateProject();
   if(e.target.closest("#new-project"))return newProject();
   if(e.target.closest("#print-report"))return window.print();
-  const openProject=e.target.closest("[data-open-project]");if(openProject){const project=loadLibrary()[openProject.dataset.openProject];if(project){state=migrateDesign(project);selected=null;undoStack=[];redoStack=[];saveState();$("#projects-dialog").close();enterWorkspace();render();showToast(`${state.name} opened`)}return}
+  const openProject=e.target.closest("[data-open-project]");if(openProject){const project=loadLibrary()[openProject.dataset.openProject];if(project){state=reviveDesign(project);selected=null;undoStack=[];redoStack=[];saveState();$("#projects-dialog").close();enterWorkspace();render();showToast(`${state.name} opened`)}return}
   const deleteProject=e.target.closest("[data-delete-project]");if(deleteProject&&confirm("Delete this locally saved design?")){const library=loadLibrary();delete library[deleteProject.dataset.deleteProject];storageSet(LIBRARY_KEY,JSON.stringify(library));renderProjectLibrary();showToast("Design deleted");return}
   const recommendVlan=e.target.closest("[data-recommend-vlan]");if(recommendVlan)return openRecommendDialog("vlan",recommendVlan.dataset.recommendVlan);
   const recommendKind=e.target.closest("[data-recommend-kind]");if(recommendKind)return setRecommendationKind(recommendKind.dataset.recommendKind);
@@ -578,7 +581,7 @@ document.addEventListener("click",e=>{
 document.addEventListener("keydown",e=>{
   if(e.key==="Escape"){const menu=$("#utility-menu");if(menu?.open){menu.open=false;menu.querySelector("summary").focus()}}
   const node=e.target.closest?.(".topology-node"),row=e.target.closest?.(".site-row,.vlan-row"),hit=e.target.closest?.(".link-hit");
-  if(node&&["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(e.key)){
+  if(node&&e.target===node&&["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(e.key)){
     e.preventDefault();const site=state.sites.find(s=>s.id===node.dataset.site);if(!site)return;
     if(e.key==="ArrowLeft")site.x=Math.max(0,site.x-2);
     if(e.key==="ArrowRight")site.x=Math.min(82,site.x+2);
@@ -588,7 +591,7 @@ document.addEventListener("keydown",e=>{
     clearTimeout(touch.timer);touch.timer=setTimeout(saveState,220);
     return;
   }
-  if((node||row||hit)&&["Enter"," "].includes(e.key)){e.preventDefault();selected=node?{type:"site",id:node.dataset.site}:hit?{type:"link",id:hit.dataset.link}:row.dataset.vlan?{type:"vlan",id:row.dataset.vlan}:{type:"site",id:row.dataset.site};render();return}
+  if((node||row||hit)&&!e.target.closest?.("button,a,input,select,textarea")&&["Enter"," "].includes(e.key)){e.preventDefault();selected=node?{type:"site",id:node.dataset.site}:hit?{type:"link",id:hit.dataset.link}:row.dataset.vlan?{type:"vlan",id:row.dataset.vlan}:{type:"site",id:row.dataset.site};render();return}
   const tab=e.target.closest?.('[role="tab"]');if(tab&&["ArrowRight","ArrowDown","ArrowLeft","ArrowUp","Home","End"].includes(e.key)){e.preventDefault();const tabs=$$('[role="tab"]'),index=tabs.indexOf(tab),next=e.key==="Home"?0:e.key==="End"?tabs.length-1:e.key.includes("Right")||e.key.includes("Down")?(index+1)%tabs.length:(index-1+tabs.length)%tabs.length;activateView(tabs[next].dataset.view,true)}
 });
 $("#recommend-form").addEventListener("submit",e=>e.preventDefault());
@@ -628,7 +631,7 @@ function exportDesign(){
 function exportCsv(){
   const headers=["Record type","Project ID","Project name","Mode","Topology mode","Policies","Flow policies","Assumptions","Links","Site ID","Site","Site type","Site range","Site devices","WAN","Growth","Site role","Hub ID","Internet breakout","Site notes","VLAN ID","VLAN","VLAN name","Purpose","Subnet","Gateway","Devices","Endpoint capacity","DHCP","DHCP start","DHCP end","Reserved","VLAN notes"],rows=[headers],metadata=[state.projectId,state.name,state.mode||"",state.topologyMode,JSON.stringify(state.policies||{}),JSON.stringify(state.flowPolicies||{}),JSON.stringify(state.assumptions||[]),JSON.stringify(state.links||[])];
   for(const site of state.sites){for(const v of site.vlans)rows.push(["vlan",...metadata,site.id,site.name,site.type,site.cidr,site.devices,site.wan,site.growth,site.topologyRole,site.hubId||"",site.internetBreakout,JSON.stringify(site.notes||""),v.id,v.vid,v.name,v.role,v.cidr,v.gateway,v.devices,safeCapacity(v),v.dhcpEnabled?"enabled":"disabled",v.dhcpStart||"",v.dhcpEnd||"",v.reserved??1,JSON.stringify(v.notes||"")]);if(!site.vlans.length)rows.push(["site",...metadata,site.id,site.name,site.type,site.cidr,site.devices,site.wan,site.growth,site.topologyRole,site.hubId||"",site.internetBreakout,JSON.stringify(site.notes||""),...Array(13).fill("")]);}
-  if(!state.sites.length)rows.push(["design",...metadata,...Array(23).fill("")]);
+  if(!state.sites.length)rows.push(["design",...metadata,...Array(24).fill("")]);
   const csv=rows.map(row=>row.map(value=>`"${guardCsvCell(value).replaceAll('"','""')}"`).join(",")).join("\n"),blob=new Blob([csv],{type:"text/csv"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`${state.name.toLowerCase().replace(/[^a-z0-9]+/g,"-")||"network"}-address-plan.csv`;a.click();URL.revokeObjectURL(a.href);showToast("Address plan exported as CSV");
 }
 function animateTrace(linkId){
@@ -656,7 +659,7 @@ $("#canvas").addEventListener("pointermove",e=>{
 });
 $("#canvas").addEventListener("pointerup",()=>{if(panDrag){panDrag=null;return}if(!drag)return;if(drag.moved)touch();else{undoStack.pop();updateHistoryButtons();selected={type:"site",id:drag.site.id};render()}drag=null});
 $("#canvas").addEventListener("wheel",e=>{if(!e.ctrlKey)return;e.preventDefault();canvasZoom=Math.max(.7,Math.min(1.5,canvasZoom+(e.deltaY<0?.1:-.1)));applyCanvasZoom()},{passive:false});
-window.addEventListener("resize",()=>renderCanvas());
+let resizeFrame=null;window.addEventListener("resize",()=>{stopTrace();cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(renderCanvas)});
 
 function findVlan(id){for(const site of state.sites){const vlan=site.vlans.find(v=>v.id===id);if(vlan)return{site,vlan}}return null}
 function safeParse(cidr){try{return parseCidr(cidr)}catch{return null}}
