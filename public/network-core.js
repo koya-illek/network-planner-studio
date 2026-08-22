@@ -18,7 +18,7 @@ export const ENUMS = Object.freeze({
   linkTypes: Object.freeze(["vpn", "private", "peering", "internet"]),
   resilience: Object.freeze(["single", "dual"]),
   routingTypes: Object.freeze(["static", "bgp"]),
-  spokePolicies: Object.freeze(["via-hub", "denied", "direct"]),
+  spokePolicies: Object.freeze(["via-hub", "denied"]),
   flowPolicies: Object.freeze(["allow", "restricted", "deny"]),
   modes: Object.freeze(["existing", "new", "sample", "imported"])
 });

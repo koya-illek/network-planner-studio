@@ -113,6 +113,7 @@ function showHome(){
 }
 
 function render(){
+  reviewCache=null;
   $("#project-name-button").textContent=state.name;
   renderSiteList();renderCanvas();renderInspector();renderAddressPlan();renderReview();renderTrafficPolicy();renderReport();
   const vlanCount=state.sites.reduce((n,s)=>n+s.vlans.length,0);
@@ -209,7 +210,9 @@ function renderAddressPlan(){
   }).join(""):`<tr><td colspan="8">No VLANs have been added yet.</td></tr>`;
 }
 
+let reviewCache=null;
 function reviewDesign(){
+  if(reviewCache)return reviewCache;
   const issues=[];
   if(!state.sites.length)return[{severity:"info",title:"Start the address hierarchy",message:"Add a site with a parent IPv4 range and create VLANs inside it."}];
   for(let i=0;i<state.sites.length;i++){
@@ -263,9 +266,10 @@ function reviewDesign(){
       if(secondary&&!state.links.some(l=>(l.from===spoke.id&&l.to===secondary.id)||(l.to===spoke.id&&l.from===secondary.id)))issues.push(issue("warning","Secondary hub path is missing",`${spoke.name} is not connected to secondary hub ${secondary.name}.`,spoke.id));
       if(spoke.internetBreakout==="hub"&&!state.links.some(l=>((l.from===spoke.id&&l.to===spoke.hubId)||(l.to===spoke.id&&l.from===spoke.hubId))&&l.defaultRoute))issues.push(issue("warning","Central breakout lacks default route",`${spoke.name} uses hub internet breakout but its hub link does not advertise a default route.`,spoke.id));
     }
-    for(const link of state.links){const a=state.sites.find(s=>s.id===link.from),b=state.sites.find(s=>s.id===link.to);if(a?.topologyRole==="spoke"&&b?.topologyRole==="spoke"&&state.policies.spokeToSpoke!=="direct")issues.push(issue("warning","Direct spoke link conflicts with policy",`${a.name} and ${b.name} are directly connected even though spoke traffic is ${state.policies.spokeToSpoke}.`,a.id));}
+    for(const link of state.links){const a=state.sites.find(s=>s.id===link.from),b=state.sites.find(s=>s.id===link.to);if(a?.topologyRole==="spoke"&&b?.topologyRole==="spoke")issues.push(issue("warning","Direct spoke link conflicts with policy",`${a.name} and ${b.name} are directly connected even though spoke traffic is ${state.policies.spokeToSpoke}.`,a.id));}
   }
   if(!issues.some(i=>["error","warning"].includes(i.severity)))issues.unshift(issue("info","Core checks passed","No overlaps, invalid allocations or immediate capacity risks were found."));
+  reviewCache=issues;
   return issues;
 }
 function issue(severity,title,message,siteId){return{severity,title,message,siteId}}
@@ -611,10 +615,6 @@ function exportCsv(){
   for(const site of state.sites){for(const v of site.vlans)rows.push(["vlan",...metadata,site.id,site.name,site.type,site.cidr,site.devices,site.wan,site.growth,site.topologyRole,site.hubId||"",site.internetBreakout,JSON.stringify(site.notes||""),v.id,v.vid,v.name,v.role,v.cidr,v.gateway,v.devices,safeCapacity(v),v.dhcpEnabled?"enabled":"disabled",v.dhcpStart||"",v.dhcpEnd||"",v.reserved??1,JSON.stringify(v.notes||"")]);if(!site.vlans.length)rows.push(["site",...metadata,site.id,site.name,site.type,site.cidr,site.devices,site.wan,site.growth,site.topologyRole,site.hubId||"",site.internetBreakout,JSON.stringify(site.notes||""),...Array(13).fill("")]);}
   if(!state.sites.length)rows.push(["design",...metadata,...Array(23).fill("")]);
   const csv=rows.map(row=>row.map(value=>`"${guardCsvCell(value).replaceAll('"','""')}"`).join(",")).join("\n"),blob=new Blob([csv],{type:"text/csv"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`${state.name.toLowerCase().replace(/[^a-z0-9]+/g,"-")||"network"}-address-plan.csv`;a.click();URL.revokeObjectURL(a.href);showToast("Address plan exported as CSV");
-}
-function startTraceSelection(){
-  if(!state.links.length)return showToast("Connect two sites before tracing a path");
-  showToast("Select a connection line to trace it");
 }
 function animateTrace(linkId){
   stopTrace();const link=state.links.find(l=>l.id===linkId),a=link&&state.sites.find(s=>s.id===link.from),b=link&&state.sites.find(s=>s.id===link.to);if(!a||!b)return;
