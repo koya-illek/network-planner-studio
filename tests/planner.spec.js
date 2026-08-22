@@ -137,3 +137,20 @@ test("surfaces a storage quota failure with a recovery prompt", async ({ page })
   await expect(page.locator("#toast")).toContainText("Export a recovery copy");
   await expect(page.locator("#save-state")).toContainText("Storage needs recovery");
 });
+
+test("skips trace particles under prefers-reduced-motion", async ({ page }) => {
+  const trace = async () => {
+    await page.getByRole("button", { name: "Trace path", exact: true }).click();
+    const options = await page.locator("#trace-form select[name=from] option").evaluateAll(es => es.map(e => e.value));
+    await page.locator("#trace-form select[name=from]").selectOption(options[0]);
+    await page.locator("#trace-form select[name=to]").selectOption(options[1]);
+    await page.locator("#trace-form button[type=submit]").click();
+    await expect(page.locator("#trace-bar")).toBeVisible();
+  };
+  await trace();
+  expect(await page.locator(".route-particle").count()).toBeGreaterThan(0);
+  await page.locator("#close-trace").click();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await trace();
+  expect(await page.locator(".route-particle").count()).toBe(0);
+});
