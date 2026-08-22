@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   parseCidr,rangesOverlap,contains,endpointCapacity,prefixForDevices,nextSubnet,
-  suggestSiteRange,isPrivateCidr,isPrivateRoutePrefix,shortestPath,migrateDesign,defaultDhcpPool,validHostInSubnet,parseRoutePrefix,validateGateway,validateDhcpPool,validateDesign,SCHEMA_ID,SCHEMA_VERSION
+  suggestSiteRange,isPrivateCidr,isPrivateRoutePrefix,shortestPath,migrateDesign,defaultDhcpPool,validHostInSubnet,parseRoutePrefix,validateGateway,validateDhcpPool,validateDesign,guardCsvCell,unguardCsvCell,SCHEMA_ID,SCHEMA_VERSION
 } from "../public/network-core.js";
 
 test("parses LAN and point-to-point IPv4 networks",()=>{
@@ -131,4 +131,24 @@ test("allocation and migration remain finite across generated boundary values",(
     assert.ok(Number.isFinite(parsed.network)&&Number.isFinite(parsed.broadcast));
     assert.ok(parsed.cidr.endsWith(`/${prefix}`));
   }
+});
+
+test("CSV export cells neutralize formula injection and round-trip losslessly",()=>{
+  assert.equal(guardCsvCell("=cmd|' /c calc"),"'=cmd|' /c calc");
+  assert.equal(guardCsvCell("+1+1"),"'+1+1");
+  assert.equal(guardCsvCell("-summary"),"'-summary");
+  assert.equal(guardCsvCell("@import"),"'@import");
+  assert.equal(guardCsvCell("\t=x"),"'\t=x");
+  assert.equal(guardCsvCell("\rcmd"),"'\rcmd");
+  assert.equal(guardCsvCell("10.20.10.0/24"),"10.20.10.0/24");
+  assert.equal(guardCsvCell(42),"42");
+  assert.equal(guardCsvCell(""),"");
+  assert.equal(guardCsvCell(null),"");
+  for(const hostile of ["=cmd","+2","-flag","@x","\ty","\rz"]){
+    const cell=guardCsvCell(hostile);
+    assert.notEqual(cell[0],hostile[0]);
+    assert.equal(unguardCsvCell(cell),hostile);
+  }
+  assert.equal(unguardCsvCell("plain"),"plain");
+  assert.equal(unguardCsvCell(""),"");
 });

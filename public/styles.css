@@ -140,6 +140,12 @@ textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(77,163,255,.2)
   .utility-menu-panel #undo-button,.utility-menu-panel #redo-button,.utility-menu-panel #import-button,.utility-menu-panel #export-button{display:flex!important}
 }
 
+@media (prefers-reduced-motion: reduce){
+  .welcome-visual path{animation:none}
+  .pulse-dot{animation:none}
+  .topology-node,.button,.inspector,.toast{transition:none}
+}
+
 /* Responsive landing and semantic heading refinements */
 @media(max-width:1050px){
   .welcome{gap:42px;padding:64px clamp(24px,7vw,72px)}

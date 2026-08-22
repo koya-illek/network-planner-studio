@@ -244,6 +244,20 @@ export function isPrivateRoutePrefix(prefix) {
   }
 }
 
+const FORMULA_CHARS = Object.freeze(["=", "+", "-", "@", "\t", "\r"]);
+
+/** Neutralize spreadsheet formula execution for exported cells. */
+export function guardCsvCell(value) {
+  const text = String(value ?? "");
+  return text && FORMULA_CHARS.includes(text[0]) ? `'${text}` : text;
+}
+
+/** Inverse of guardCsvCell so export/import round trips stay lossless. */
+export function unguardCsvCell(value) {
+  const text = String(value ?? "");
+  return text.length > 1 && text[0] === "'" && FORMULA_CHARS.includes(text[1]) ? text.slice(1) : text;
+}
+
 export function shortestPath(sites, links, from, to, { topologyMode = "custom", spokeToSpoke = "via-hub" } = {}) {
   if (from === to) return { sites: [from], links: [] };
   const byId = new Map(sites.map(site => [site.id, site]));

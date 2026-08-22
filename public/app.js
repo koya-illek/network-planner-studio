@@ -1,8 +1,8 @@
-import {SCHEMA_ID,SCHEMA_VERSION,ENUMS,ipToInt,parseCidr,parseRoutePrefix,rangesOverlap,contains,firstUsable,endpointCapacity,defaultDhcpPool,validHostInSubnet,validateGateway,validateDhcpPool,prefixForDevices,nextSubnet,suggestSiteRange as suggestSiteRangeCore,isPrivateCidr,isPrivateRoutePrefix,shortestPath,migrateDesign,createSite,createVlan,createLink,validateDesign} from "./network-core.js";
+import {SCHEMA_ID,SCHEMA_VERSION,ENUMS,ipToInt,parseCidr,parseRoutePrefix,rangesOverlap,contains,firstUsable,endpointCapacity,defaultDhcpPool,validHostInSubnet,validateGateway,validateDhcpPool,prefixForDevices,nextSubnet,suggestSiteRange as suggestSiteRangeCore,isPrivateCidr,isPrivateRoutePrefix,guardCsvCell,unguardCsvCell,shortestPath,migrateDesign,createSite,createVlan,createLink,validateDesign} from "./network-core.js";
 
 const STORAGE_KEY = "network-planner-studio.v1";
 const LIBRARY_KEY = "network-planner-studio.projects.v1";
-const ROLE_COLORS = {users:"#5d89b3",voice:"#8a72b5",guest:"#f0b35b",iot:"#d97663",servers:"#4b9c7a",management:"#65756e",transit:"#9b8a66",other:"#7d8794"};
+const prefersReducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 const TYPE_ICONS = {office:"OF",branch:"BR",datacentre:"DC",cloud:"CL",warehouse:"WH"};
 const $ = (selector, root=document) => root.querySelector(selector);
 const $$ = (selector, root=document) => [...root.querySelectorAll(selector)];
@@ -474,7 +474,7 @@ function animateRoute(fromId,toId){
   if(!route){$("#trace-detail").textContent="No permitted route exists under the current topology policy";return}
   const names=route.sites.map(id=>state.sites.find(s=>s.id===id)?.name).filter(Boolean);$("#trace-detail").textContent=names.join(" → ");
   const svg=$("#link-layer"),dur=2.3;
-  route.links.forEach((linkId,index)=>svg.insertAdjacentHTML("beforeend",`<circle class="trace-particle route-particle" r="6"><animateMotion begin="${index*dur}s" dur="${dur}s" repeatCount="indefinite"><mpath href="#route-${linkId}"/></animateMotion></circle>`));
+  if(!prefersReducedMotion.matches)route.links.forEach((linkId,index)=>svg.insertAdjacentHTML("beforeend",`<circle class="trace-particle route-particle" r="6"><animateMotion begin="${index*dur}s" dur="${dur}s" repeatCount="indefinite"><mpath href="#route-${linkId}"/></animateMotion></circle>`));
   $$(".topology-node").forEach(n=>n.classList.toggle("trace-active",route.sites.includes(n.dataset.site)));
 }
 
@@ -584,7 +584,7 @@ function designFromCsv(text){
   const lines=text.replace(/^\uFEFF/,"").split(/\r?\n/).filter(line=>line.trim());if(lines.length<2)throw new Error("CSV must include a header and at least one address record");
   const headers=parseCsvLine(lines[0]).map(h=>h.trim().toLowerCase()),required=headers.includes("record type")?["record type","site range"]:["site","site range","vlan","subnet"];
   if(required.some(h=>!headers.includes(h)))throw new Error(`CSV requires columns: ${required.join(", ")}`);
-  const decode=(value,key)=>{const textValue=String(value??"").trim();if(!textValue)return"";if(["policies","flow policies","assumptions","links"].includes(key)){try{return JSON.parse(textValue)}catch{throw new Error(`CSV ${key} metadata is not valid JSON`)}}if(key==="site notes"||key==="vlan notes"){try{return JSON.parse(textValue)}catch{return textValue}}return textValue};
+  const decode=(value,key)=>{let textValue=String(value??"").trim();if(!textValue)return"";textValue=unguardCsvCell(textValue);if(["policies","flow policies","assumptions","links"].includes(key)){try{return JSON.parse(textValue)}catch{throw new Error(`CSV ${key} metadata is not valid JSON`)}}if(key==="site notes"||key==="vlan notes"){try{return JSON.parse(textValue)}catch{return textValue}}return textValue};
   const records=lines.slice(1).map(line=>Object.fromEntries(parseCsvLine(line).map((value,index)=>[headers[index],decode(value,headers[index])]))) ,sites=[],siteById=new Map();let metadata=null;
   for(const record of records){
     if(record["record type"]==="design")metadata=record;
@@ -605,7 +605,7 @@ function exportCsv(){
   const headers=["Record type","Project ID","Project name","Mode","Topology mode","Policies","Flow policies","Assumptions","Links","Site ID","Site","Site type","Site range","Site devices","WAN","Growth","Site role","Hub ID","Internet breakout","Site notes","VLAN ID","VLAN","VLAN name","Purpose","Subnet","Gateway","Devices","Endpoint capacity","DHCP","DHCP start","DHCP end","Reserved","VLAN notes"],rows=[headers],metadata=[state.projectId,state.name,state.mode||"",state.topologyMode,JSON.stringify(state.policies||{}),JSON.stringify(state.flowPolicies||{}),JSON.stringify(state.assumptions||[]),JSON.stringify(state.links||[])];
   for(const site of state.sites){for(const v of site.vlans)rows.push(["vlan",...metadata,site.id,site.name,site.type,site.cidr,site.devices,site.wan,site.growth,site.topologyRole,site.hubId||"",site.internetBreakout,JSON.stringify(site.notes||""),v.id,v.vid,v.name,v.role,v.cidr,v.gateway,v.devices,safeCapacity(v),v.dhcpEnabled?"enabled":"disabled",v.dhcpStart||"",v.dhcpEnd||"",v.reserved??1,JSON.stringify(v.notes||"")]);if(!site.vlans.length)rows.push(["site",...metadata,site.id,site.name,site.type,site.cidr,site.devices,site.wan,site.growth,site.topologyRole,site.hubId||"",site.internetBreakout,JSON.stringify(site.notes||""),...Array(13).fill("")]);}
   if(!state.sites.length)rows.push(["design",...metadata,...Array(23).fill("")]);
-  const csv=rows.map(row=>row.map(value=>`"${String(value??"").replaceAll('"','""')}"`).join(",")).join("\n"),blob=new Blob([csv],{type:"text/csv"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`${state.name.toLowerCase().replace(/[^a-z0-9]+/g,"-")||"network"}-address-plan.csv`;a.click();URL.revokeObjectURL(a.href);showToast("Address plan exported as CSV");
+  const csv=rows.map(row=>row.map(value=>`"${guardCsvCell(value).replaceAll('"','""')}"`).join(",")).join("\n"),blob=new Blob([csv],{type:"text/csv"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`${state.name.toLowerCase().replace(/[^a-z0-9]+/g,"-")||"network"}-address-plan.csv`;a.click();URL.revokeObjectURL(a.href);showToast("Address plan exported as CSV");
 }
 function startTraceSelection(){
   if(!state.links.length)return showToast("Connect two sites before tracing a path");
@@ -616,7 +616,7 @@ function animateTrace(linkId){
   const conflict=rangesOverlap(a.cidr,b.cidr);
   $("#trace-bar").classList.remove("hidden");$("#trace-title").textContent=`${a.name} → ${b.name}`;
   const steps=conflict?["Source VLAN and default gateway","Site edge and route lookup","Trace stopped: destination range overlaps the source site"]:["Source VLAN and default gateway","Site edge and route lookup",`${linkLabel(link)} transport`,"Destination route and VLAN","Path validated"];
-  if(!conflict){
+  if(!conflict&&!prefersReducedMotion.matches){
     const svg=$("#link-layer");
     svg.insertAdjacentHTML("beforeend",`<circle id="trace-particle" class="trace-particle" r="6"><animateMotion dur="3.2s" repeatCount="indefinite"><mpath href="#route-${link.id}"/></animateMotion></circle>`);
   }
