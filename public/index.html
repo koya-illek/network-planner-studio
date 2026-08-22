@@ -198,7 +198,7 @@
         <label>Internet breakout<select name="internetBreakout"><option value="local">Local</option><option value="hub">Through hub</option><option value="none">None</option></select></label>
         <label class="wide">Design notes<textarea name="notes" placeholder="Assumptions, ownership, constraints…"></textarea></label>
       </div>
-      <div id="site-form-error" class="form-error"></div>
+      <div id="site-form-error" class="form-error" aria-live="polite"></div>
       <div class="dialog-actions"><button class="button ghost" type="button" data-close-dialog>Cancel</button><button class="button primary" id="site-submit" type="submit">Add site</button></div>
     </form>
   </dialog>
@@ -219,7 +219,7 @@
         <label>DHCP pool end <span class="optional">(optional)</span><input name="dhcpEnd" placeholder="Automatically calculated"></label>
         <label class="wide">Design notes<textarea name="notes" placeholder="DHCP exclusions, security zone, purpose…"></textarea></label>
       </div>
-      <div id="vlan-form-error" class="form-error"></div>
+      <div id="vlan-form-error" class="form-error" aria-live="polite"></div>
       <div class="dialog-actions"><button class="button ghost" type="button" data-close-dialog>Cancel</button><button class="button primary" id="vlan-submit" type="submit">Add VLAN</button></div>
     </form>
   </dialog>
@@ -237,7 +237,7 @@
         <label class="wide check-label"><input name="defaultRoute" type="checkbox"> Advertise a default route over this connection</label>
         <label class="wide">Advertised IPv4 prefixes<input name="advertisedPrefixes" placeholder="e.g. 10.20.0.0/16, 10.30.0.0/16"><small>Leave blank when routing is learned elsewhere or not yet defined.</small></label>
       </div>
-      <div id="connect-form-error" class="form-error"></div>
+      <div id="connect-form-error" class="form-error" aria-live="polite"></div>
       <div class="dialog-actions"><button class="button ghost" type="button" data-close-dialog>Cancel</button><button class="button primary" id="connect-submit" type="submit">Create connection</button></div>
     </form>
   </dialog>
@@ -273,7 +273,7 @@
         <label class="wide">VLAN name<input name="vlanName" placeholder="Suggested from purpose"></label>
       </div>
       <div id="recommend-preview" class="recommend-preview"></div>
-      <div id="recommend-error" class="form-error"></div>
+      <div id="recommend-error" class="form-error" aria-live="polite"></div>
       <div class="dialog-actions"><button class="button ghost" type="button" data-close-dialog>Cancel</button><button class="button secondary" id="refresh-recommendation" type="button">Refresh proposal</button><button class="button primary" id="apply-recommendation" type="button">Apply recommendation</button></div>
     </form>
   </dialog>
@@ -289,7 +289,7 @@
         <label class="wide check-label"><input name="centralizedInspection" type="checkbox" checked> Route inter-site traffic through centralized inspection</label>
         <label class="wide check-label"><input name="createLinks" type="checkbox" checked> Create missing VPN links between the hub and every spoke</label>
       </div>
-      <div id="hub-form-error" class="form-error"></div>
+      <div id="hub-form-error" class="form-error" aria-live="polite"></div>
       <div class="dialog-actions"><button class="button ghost" type="button" data-close-dialog>Cancel</button><button class="button primary" type="submit">Apply hub-and-spoke design</button></div>
     </form>
   </dialog>
@@ -298,7 +298,7 @@
     <form id="trace-form">
       <div class="dialog-heading"><div><h2 id="trace-dialog-title">Trace an end-to-end path</h2><p>Choose source and destination sites. The planner will follow every transit hop and apply the topology policy.</p></div><button class="dialog-close" type="button" data-close-dialog aria-label="Close">×</button></div>
       <div class="form-grid"><label>Source site<select name="from" required></select></label><label>Destination site<select name="to" required></select></label></div>
-      <div id="trace-form-error" class="form-error"></div>
+      <div id="trace-form-error" class="form-error" aria-live="polite"></div>
       <div class="dialog-actions"><button class="button ghost" type="button" data-close-dialog>Cancel</button><button class="button primary" type="submit">Trace route</button></div>
     </form>
   </dialog>
