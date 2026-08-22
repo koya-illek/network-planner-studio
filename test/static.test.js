@@ -49,3 +49,9 @@ test("worker exposes health and hardened assets", async () => {
   assert.doesNotMatch(html, /class="(?:eyebrow|kicker)"/);
   assert.doesNotMatch(html, /—/);
 });
+
+test("health release version matches package.json", async () => {
+  const pkg = JSON.parse(await readFile(new URL("package.json", root), "utf8"));
+  const worker = await readFile(new URL("worker.js", root), "utf8");
+  assert.ok(worker.includes(`version: "${pkg.version}"`), "worker health payload must report the package.json version");
+});

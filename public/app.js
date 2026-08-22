@@ -2,6 +2,8 @@ import {SCHEMA_ID,SCHEMA_VERSION,ENUMS,ipToInt,parseCidr,parseRoutePrefix,ranges
 
 const STORAGE_KEY = "network-planner-studio.v1";
 const LIBRARY_KEY = "network-planner-studio.projects.v1";
+const LIBRARY_LIMIT = 20;
+const IMPORT_MAX_BYTES = 10 * 1024 * 1024;
 const prefersReducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 const TYPE_ICONS = {office:"OF",branch:"BR",datacentre:"DC",cloud:"CL",warehouse:"WH"};
 const $ = (selector, root=document) => root.querySelector(selector);
@@ -74,7 +76,8 @@ function saveState(){
   state.updatedAt=new Date().toISOString();
   const saved=storageSet(STORAGE_KEY,JSON.stringify(state));
   const library=loadLibrary();library[state.projectId]=state;
-  const librarySaved=storageSet(LIBRARY_KEY,JSON.stringify(library));
+  const kept=Object.entries(library).sort((a,b)=>String(b[1].updatedAt).localeCompare(String(a[1].updatedAt))).slice(0,LIBRARY_LIMIT);
+  const librarySaved=storageSet(LIBRARY_KEY,JSON.stringify(Object.fromEntries(kept)));
   $("#save-state").textContent=saved&&librarySaved?"Saved locally":"Storage needs recovery";
   if(!saved||!librarySaved) showToast(storageIssue);
 }
@@ -179,9 +182,9 @@ function renderInspector(){
       ${s.notes?`<div class="inspector-section"><h3>Notes</h3><p>${escapeHtml(s.notes)}</p></div>`:""}
       <div class="inspector-actions"><button class="button primary" data-inspector-add-vlan="${s.id}" type="button">+ Add VLAN</button><button class="button secondary" data-recommend-vlan="${s.id}" type="button">✦ Recommend VLAN</button><button class="button ghost" data-edit-site="${s.id}" type="button">Edit</button><button class="button ghost" data-delete-site="${s.id}" type="button">Delete site</button></div></div>`;
   } else if(selected.type==="vlan"){
-    const found=findVlan(selected.id);if(!found){selected=null;return renderInspector()}const {site,vlan:v}=found,p=safeParse(v.cidr),capacity=safeCapacity(v),head=p?Math.round((1-v.devices/capacity)*100):0;
+    const found=findVlan(selected.id);if(!found){selected=null;return renderInspector()}const {site,vlan:v}=found,p=safeParse(v.cidr),capacity=safeCapacity(v),over=p&&v.devices>capacity,head=p?Math.max(0,Math.round((1-v.devices/capacity)*100)):0;
     root.innerHTML=`<div class="inspector-content"><p class="context-label">VLAN ${v.vid} · ${escapeHtml(v.role)}</p><h2>${escapeHtml(v.name)}</h2><p>Segment within ${escapeHtml(site.name)}.</p>
-      <div class="detail-grid"><div class="detail"><span>IPv4 subnet</span><strong>${escapeHtml(v.cidr)}</strong></div><div class="detail"><span>Gateway</span><strong>${escapeHtml(v.gateway)}</strong></div><div class="detail"><span>Devices</span><strong>${v.devices}</strong></div><div class="detail"><span>Headroom</span><strong>${head}%</strong></div></div>
+      <div class="detail-grid"><div class="detail"><span>IPv4 subnet</span><strong>${escapeHtml(v.cidr)}</strong></div><div class="detail"><span>Gateway</span><strong>${escapeHtml(v.gateway)}</strong></div><div class="detail"><span>Devices</span><strong>${v.devices}</strong></div><div class="detail"><span>Headroom</span><strong>${head}%</strong>${over?'<span class="status-pill error">Over capacity</span>':""}</div></div>
       <div class="inspector-section"><h3>DHCP and reservations</h3><p>${v.dhcpEnabled?`${escapeHtml(v.dhcpStart)} – ${escapeHtml(v.dhcpEnd)}`:"Static addressing"} · ${v.reserved||1} reserved address${(v.reserved||1)===1?"":"es"}</p></div>
       <div class="inspector-section"><h3>Best-practice note</h3><p>${roleAdvice(v.role)}</p></div>
       ${v.notes?`<div class="inspector-section"><h3>Notes</h3><p>${escapeHtml(v.notes)}</p></div>`:""}
@@ -574,7 +577,9 @@ $("#recommend-form").addEventListener("input",()=>{clearTimeout(buildRecommendat
 $("#recommend-form").addEventListener("change",()=>buildRecommendation());
 
 $("#file-input").addEventListener("change",async e=>{
-  const file=e.target.files[0];if(!file)return;try{const text=await file.text(),raw=file.name.toLowerCase().endsWith(".csv")?designFromCsv(text):JSON.parse(text),imported=file.name.toLowerCase().endsWith(".csv")?raw:migrateDesign(raw,{strict:true});pushHistory();state=imported;state.mode="imported";selected=null;saveState();enterWorkspace();render();showToast(`${file.name.toLowerCase().endsWith(".csv")?"CSV":"Design"} imported and validated`)}catch(err){showToast(`Import failed: ${err.message}`)}e.target.value="";
+  const file=e.target.files[0];if(!file)return;
+  if(file.size>IMPORT_MAX_BYTES){showToast(`Import failed: ${file.name} is larger than 10 MB`);e.target.value="";return}
+  try{const text=await file.text(),raw=file.name.toLowerCase().endsWith(".csv")?designFromCsv(text):JSON.parse(text),imported=file.name.toLowerCase().endsWith(".csv")?raw:migrateDesign(raw,{strict:true});pushHistory();state=imported;state.mode="imported";selected=null;saveState();enterWorkspace();render();showToast(`${file.name.toLowerCase().endsWith(".csv")?"CSV":"Design"} imported and validated`)}catch(err){showToast(`Import failed: ${err.message}`)}e.target.value="";
 });
 function parseCsvLine(line){
   const values=[];let value="",quoted=false;
