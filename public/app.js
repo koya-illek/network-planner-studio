@@ -281,7 +281,7 @@ function renderReview(){
   const issues=reviewDesign(),errors=issues.filter(i=>i.severity==="error").length,warnings=issues.filter(i=>i.severity==="warning").length;
   const score=Math.max(0,100-errors*18-warnings*7-issues.filter(i=>i.severity==="advice").length*2);
   $("#issue-count").textContent=errors+warnings;$("#issue-count").classList.toggle("has-errors",errors+warnings>0);
-  $("#review-score").innerHTML=`<div class="score-ring">${score}</div><div><h2>${errors?`${errors} blocking issue${errors===1?"":"s"} found`:warnings?`${warnings} design risk${warnings===1?"":"s"} to review`:"The foundations look healthy"}</h2><p>${errors?"Resolve address conflicts before implementation or connecting sites.":"Recommendations remain editable; document intentional exceptions."}</p></div>`;
+  $("#review-score").innerHTML=`<div class="score-ring" role="img" aria-label="Design score ${score} out of 100">${score}</div><div><h2>${errors?`${errors} blocking issue${errors===1?"":"s"} found`:warnings?`${warnings} design risk${warnings===1?"":"s"} to review`:"The foundations look healthy"}</h2><p>${errors?"Resolve address conflicts before implementation or connecting sites.":"Recommendations remain editable; document intentional exceptions."}</p></div>`;
   const assumptions=(state.assumptions||[]).map(message=>({severity:"info",title:"Design assumption",message}));
   $("#review-list").innerHTML=[...issues,...assumptions].map(i=>`<article class="review-item ${i.severity}"><span class="review-icon">${i.severity==="error"?"!":i.severity==="warning"?"△":"✓"}</span><div><h3>${escapeHtml(i.title)}</h3><p>${escapeHtml(i.message)}</p></div><small>${i.severity}</small></article>`).join("");
 }
@@ -533,7 +533,7 @@ document.addEventListener("click",e=>{
   if(utilityMenu?.open&&!utilityMenu.contains(e.target))utilityMenu.open=false;
   if(utilityCommand&&!utilityCommand.disabled)queueMicrotask(()=>{utilityMenu.open=false});
   const closeDialog=e.target.closest("[data-close-dialog]");if(closeDialog)return closeDialog.closest("dialog").close();
-  const closeInspector=e.target.closest("[data-inspector-close]");if(closeInspector){selected=null;render();return}
+  const closeInspector=e.target.closest("[data-inspector-close]");if(closeInspector){selected=null;render();$("#inspector").focus();return}
   if(e.target.closest("#home-button,.brand")){e.preventDefault();return showHome()}
   if(e.target.closest("#continue-design")){state.mode=state.mode||"existing";saveState();enterWorkspace();render();return}
   if(e.target.closest("#undo-button"))return restoreHistory(undoStack,redoStack);
@@ -565,15 +565,15 @@ document.addEventListener("click",e=>{
   if(e.target.closest("#project-name-button")){$("#name-form").elements.name.value=state.name;$("#name-form").elements.assumptions.value=(state.assumptions||[]).join("\n");$("#name-dialog").showModal();return}
   if(e.target.closest("#export-button"))return exportDesign();
   if(e.target.closest("#csv-export"))return exportCsv();
-  const flow=e.target.closest("[data-flow]");if(flow){pushHistory();state.flowPolicies=state.flowPolicies||{};const current=state.flowPolicies[flow.dataset.flow]||flow.textContent.trim(),next=current==="allow"?"restricted":current==="restricted"?"deny":"allow";state.flowPolicies[flow.dataset.flow]=next;touch();return}
+  const flow=e.target.closest("[data-flow]");if(flow){pushHistory();state.flowPolicies=state.flowPolicies||{};const [source,destination]=flow.dataset.flow.split(":"),current=state.flowPolicies[flow.dataset.flow]||flow.textContent.trim(),next=current==="allow"?"restricted":current==="restricted"?"deny":"allow";state.flowPolicies[flow.dataset.flow]=next;flow.classList.remove("allow","restricted","deny");flow.classList.add(next);flow.textContent=next;flow.setAttribute("aria-label",`${source} to ${destination}: ${next}`);showToast(`${source} to ${destination}: ${next}`);touch();return}
   if(e.target.closest("#import-button"))return $("#file-input").click();
   if(e.target.closest("#add-vlan-address"))return openVlanDialog(state.sites[0]?.id);
   const editSite=e.target.closest("[data-edit-site]");if(editSite)return openSiteDialog(editSite.dataset.editSite);
   const editVlan=e.target.closest("[data-edit-vlan]");if(editVlan){const found=findVlan(editVlan.dataset.editVlan);return openVlanDialog(found?.site.id,editVlan.dataset.editVlan)}
   const editLink=e.target.closest("[data-edit-link]");if(editLink)return openConnectDialog(null,editLink.dataset.editLink);
-  const delSite=e.target.closest("[data-delete-site]");if(delSite&&confirm("Delete this site, its VLANs and connections?")){pushHistory();state.sites=state.sites.filter(s=>s.id!==delSite.dataset.deleteSite);state.links=state.links.filter(l=>l.from!==delSite.dataset.deleteSite&&l.to!==delSite.dataset.deleteSite);selected=null;touch();return}
-  const delVlan=e.target.closest("[data-delete-vlan]");if(delVlan&&confirm("Delete this VLAN?")){pushHistory();for(const s of state.sites)s.vlans=s.vlans.filter(v=>v.id!==delVlan.dataset.deleteVlan);selected=null;touch();return}
-  const delLink=e.target.closest("[data-delete-link]");if(delLink&&confirm("Delete this connection?")){pushHistory();state.links=state.links.filter(l=>l.id!==delLink.dataset.deleteLink);selected=null;touch();return}
+  const delSite=e.target.closest("[data-delete-site]");if(delSite&&confirm("Delete this site, its VLANs and connections?")){pushHistory();state.sites=state.sites.filter(s=>s.id!==delSite.dataset.deleteSite);state.links=state.links.filter(l=>l.from!==delSite.dataset.deleteSite&&l.to!==delSite.dataset.deleteSite);selected=null;touch();$("#inspector").focus();return}
+  const delVlan=e.target.closest("[data-delete-vlan]");if(delVlan&&confirm("Delete this VLAN?")){pushHistory();for(const s of state.sites)s.vlans=s.vlans.filter(v=>v.id!==delVlan.dataset.deleteVlan);selected=null;touch();$("#inspector").focus();return}
+  const delLink=e.target.closest("[data-delete-link]");if(delLink&&confirm("Delete this connection?")){pushHistory();state.links=state.links.filter(l=>l.id!==delLink.dataset.deleteLink);selected=null;touch();$("#inspector").focus();return}
   const trace=e.target.closest("[data-trace-link]");if(trace)return animateTrace(trace.dataset.traceLink);
   if(e.target.closest("#close-trace"))return stopTrace();
   if(e.target.closest("#rerun-review")){reviewCache=null;renderReview();showToast("Design review updated")}
