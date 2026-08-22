@@ -4,6 +4,32 @@ Review date: 2026-08-14 (Europe/Dublin)
 
 Reviewed target: [network.illek.ie](https://network.illek.ie/)
 
+## Resolution status (2026-08-22)
+
+All six High findings and every Medium finding below have since been fixed and verified; treat the narrative sections as historical. Per-finding status:
+
+| Finding | Status | Evidence |
+| --- | --- | --- |
+| H-01 stale Pages deployment | Resolved | `network-planner-studio.pages.dev` is NXDOMAIN; only the Worker custom domains serve traffic |
+| H-02 unvalidated imported gateways | Resolved | Gateway validated in `validateNormalizedDesign` (`public/network-core.js`, `invalid-gateway`) and flagged by design review |
+| H-03 pools ignoring reserved counts | Resolved | `validateDhcpPool` rejects pool/reserved overlaps on every entry path |
+| H-04 lossy CSV DHCP round trip | Resolved | CSV import preserves explicit pools; covered by e2e `keeps CSV DHCP pool boundaries on export and import` |
+| H-05 incomplete recommended VLAN objects | Resolved | Recommendations build through `createVlan`/`createSite`/`createLink` canonical factories |
+| H-06 policy attribute injection | Resolved | Imported roles/enums clamp to allowlists (`normalizeVlan`, `normalizeLink`); matrix cells escaped; hostile-import e2e test passes |
+| M-01 CSP vs inline styles | Resolved | Role colors are CSS classes; e2e asserts zero console CSP errors |
+| M-02 tablet overflow | Resolved | 1050px breakpoint with off-canvas inspector; overflow asserted at 1024px and 390px |
+| M-03 scrolled workspace entry | Resolved | `start()` scrolls to top before revealing the workspace |
+| M-04 route-prefix parsing | Resolved | `parseRoutePrefix` accepts `/0`–`/32` separately from allocation CIDRs |
+| M-05 report omits policy matrix | Resolved | Report includes traffic-policy matrix, breakout/hub table, inspection intent, assumptions, unresolved review items |
+| M-06 accessibility semantics | Resolved | Tablist/tab/tabpanel semantics, labelled dialogs, row keyboard support, axe-core in CI |
+| M-07 storage failure boundary | Resolved | Wrapped storage with recovery prompts; quota-failure e2e test; library capped at 20 projects (2026-08-22) |
+| M-08 import normalization gaps | Resolved | Unique-ID checks, parsed advertised prefixes, enum clamping, bounded allocator arguments |
+| L-02 dead code remnants | Partially resolved | `startTraceSelection` removed 2026-08-22; module split intentionally deferred |
+
+A follow-up review dated 2026-08-22 found no Critical or High issues; see the repository history from commit `56ade12` onward for the fixes listed above.
+
+Reviewed target: [network.illek.ie](https://network.illek.ie/)
+
 Repository: `/home/koya/network-planner-studio`
 
 This is a read-only product and deployment review. No product code, deployment, DNS, storage, or external state was changed. The only file added by this review is this report.
