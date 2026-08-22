@@ -543,7 +543,7 @@ document.addEventListener("click",e=>{
   if(e.target.closest("#refresh-recommendation"))return buildRecommendation();
   if(e.target.closest("#apply-recommendation"))return applyRecommendation();
   if(e.target.closest("#hub-spoke-button"))return openHubDialog();
-  if(e.target.closest("#mobile-sites-button"))return $(".tool-panel").classList.toggle("mobile-open");
+  if(e.target.closest("#mobile-sites-button")){const open=$(".tool-panel").classList.toggle("mobile-open");$("#mobile-sites-button").setAttribute("aria-expanded",String(open));return}
   if(e.target.closest("#zoom-in")){canvasZoom=Math.min(1.5,canvasZoom+.1);return applyCanvasZoom()}
   if(e.target.closest("#zoom-out")){canvasZoom=Math.max(.7,canvasZoom-.1);return applyCanvasZoom()}
   if(e.target.closest("#zoom-fit")){canvasZoom=1;canvasPan={x:0,y:0};return applyCanvasZoom()}
@@ -572,7 +572,18 @@ document.addEventListener("click",e=>{
   if(e.target.closest("#rerun-review")){renderReview();showToast("Design review updated")}
 });
 document.addEventListener("keydown",e=>{
+  if(e.key==="Escape"){const menu=$("#utility-menu");if(menu?.open){menu.open=false;menu.querySelector("summary").focus()}}
   const node=e.target.closest?.(".topology-node"),row=e.target.closest?.(".site-row,.vlan-row");
+  if(node&&["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(e.key)){
+    e.preventDefault();const site=state.sites.find(s=>s.id===node.dataset.site);if(!site)return;
+    if(e.key==="ArrowLeft")site.x=Math.max(0,site.x-2);
+    if(e.key==="ArrowRight")site.x=Math.min(82,site.x+2);
+    if(e.key==="ArrowUp")site.y=Math.max(0,site.y-2);
+    if(e.key==="ArrowDown")site.y=Math.min(84,site.y+2);
+    renderCanvas();$(`.topology-node[data-site="${site.id}"]`)?.focus();
+    clearTimeout(touch.timer);touch.timer=setTimeout(saveState,220);
+    return;
+  }
   if((node||row)&&["Enter"," "].includes(e.key)){e.preventDefault();selected=node?{type:"site",id:node.dataset.site}:row.dataset.vlan?{type:"vlan",id:row.dataset.vlan}:{type:"site",id:row.dataset.site};render();return}
   const tab=e.target.closest?.('[role="tab"]');if(tab&&["ArrowRight","ArrowDown","ArrowLeft","ArrowUp","Home","End"].includes(e.key)){e.preventDefault();const tabs=$$('[role="tab"]'),index=tabs.indexOf(tab),next=e.key==="Home"?0:e.key==="End"?tabs.length-1:e.key.includes("Right")||e.key.includes("Down")?(index+1)%tabs.length:(index-1+tabs.length)%tabs.length;activateView(tabs[next].dataset.view,true)}
 });

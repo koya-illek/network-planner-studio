@@ -88,7 +88,7 @@
       </nav>
 
       <div id="topology-view" class="view active" role="tabpanel" aria-labelledby="tab-topology" tabindex="0">
-        <aside class="tool-panel">
+        <aside class="tool-panel" id="sites-panel">
           <div class="panel-heading">
             <div><h2>Sites and networks</h2></div>
             <button class="icon-button" id="add-site-side" type="button" aria-label="Add site" title="Add site">+</button>
@@ -103,7 +103,7 @@
         <section class="canvas-shell">
           <div class="canvas-toolbar">
             <div class="mode-group">
-              <button id="mobile-sites-button" class="mobile-only" type="button">Sites</button>
+              <button id="mobile-sites-button" class="mobile-only" type="button" aria-expanded="false" aria-controls="sites-panel">Sites</button>
               <button class="active" data-tool="select" type="button">Select</button>
               <button data-tool="connect" type="button">Connect sites</button>
               <button data-tool="trace" type="button">Trace path</button>
