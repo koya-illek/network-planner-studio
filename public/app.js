@@ -6,6 +6,7 @@ const LIBRARY_LIMIT = 20;
 const IMPORT_MAX_BYTES = 10 * 1024 * 1024;
 const prefersReducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 const TYPE_ICONS = {office:"OF",branch:"BR",datacentre:"DC",cloud:"CL",warehouse:"WH"};
+const INSPECTOR_CLOSE = `<button class="button ghost inspector-close" data-inspector-close type="button" aria-label="Close inspector">×</button>`;
 const $ = (selector, root=document) => root.querySelector(selector);
 const $$ = (selector, root=document) => [...root.querySelectorAll(selector)];
 const uid = () => crypto.randomUUID();
@@ -96,6 +97,7 @@ function showToast(message){const el=$("#toast");el.textContent=message;el.class
 function start(mode){
   if(mode==="sample") state=sampleState();
   else {state=blankState();state.mode=mode}
+  undoStack=[];redoStack=[];updateHistoryButtons();
   saveState();window.scrollTo({top:0,left:0,behavior:"auto"});$("#welcome").classList.add("hidden");$("#workspace").classList.remove("hidden");render();
   if(mode!=="sample") openSiteDialog();
 }
@@ -113,6 +115,7 @@ function showHome(){
 }
 
 function render(){
+  stopTrace();
   reviewCache=null;
   $("#project-name-button").textContent=state.name;
   renderSiteList();renderCanvas();renderInspector();renderAddressPlan();renderReview();renderTrafficPolicy();renderReport();
@@ -157,7 +160,7 @@ function renderCanvas(){
     const a=state.sites.find(s=>s.id===link.from),b=state.sites.find(s=>s.id===link.to);if(!a||!b)continue;
     const ap=point(a),bp=point(b),x1=ap.x,y1=ap.y,x2=bp.x,y2=bp.y;
     const path=`M ${x1} ${y1} C ${(x1+x2)/2} ${y1}, ${(x1+x2)/2} ${y2}, ${x2} ${y2}`;
-    svg.insertAdjacentHTML("beforeend",`<path id="route-${link.id}" d="${path}" class="link ${link.resilience==="dual"?"dual":""}"/><path d="${path}" class="link-hit" data-link="${link.id}"/><text class="link-label" x="${(x1+x2)/2}" y="${(y1+y2)/2-7}" text-anchor="middle">${linkLabel(link)}</text>`);
+    svg.insertAdjacentHTML("beforeend",`<path id="route-${link.id}" d="${path}" class="link ${link.resilience==="dual"?"dual":""}"/><path d="${path}" class="link-hit" data-link="${link.id}" tabindex="0" role="button" aria-label="${escapeHtml(`${a.name} to ${b.name} connection`)}"/><text class="link-label" x="${(x1+x2)/2}" y="${(y1+y2)/2-7}" text-anchor="middle">${linkLabel(link)}</text>`);
   }
   for(const site of state.sites){
     const node=document.createElement("div"),position=point(site);node.className=`topology-node role-${site.topologyRole||"standalone"} ${selected?.type==="site"&&selected.id===site.id?"selected":""}`;node.dataset.site=site.id;node.tabIndex=0;node.setAttribute("role","button");node.setAttribute("aria-label",`${site.name}, ${site.topologyRole||"standalone"} site, ${site.cidr}`);
@@ -177,14 +180,14 @@ function renderInspector(){
   if(selected.type==="site"){
     const s=state.sites.find(x=>x.id===selected.id);if(!s){selected=null;return renderInspector()}
     const cap=s.vlans.reduce((n,v)=>n+safeCapacity(v),0);
-    root.innerHTML=`<div class="inspector-content"><p class="context-label">${escapeHtml(s.type)} · ${escapeHtml(s.topologyRole||"standalone")}</p><h2>${escapeHtml(s.name)}</h2><p>This site owns its parent IPv4 range. Add existing or proposed VLANs inside it.</p>
+    root.innerHTML=`<div class="inspector-content">${INSPECTOR_CLOSE}<p class="context-label">${escapeHtml(s.type)} · ${escapeHtml(s.topologyRole||"standalone")}</p><h2>${escapeHtml(s.name)}</h2><p>This site owns its parent IPv4 range. Add existing or proposed VLANs inside it.</p>
       <div class="detail-grid"><div class="detail"><span>Site range</span><strong>${escapeHtml(s.cidr)}</strong></div><div class="detail"><span>VLANs</span><strong>${s.vlans.length}</strong></div><div class="detail"><span>Planned devices</span><strong>${s.devices}</strong></div><div class="detail"><span>VLAN capacity</span><strong>${cap}</strong></div></div>
       <div class="inspector-section"><h3>Connectivity</h3><p>${connectionsFor(s.id)} connection${connectionsFor(s.id)===1?"":"s"} · ${s.wan==="dual"?"Dual WAN":s.wan==="single"?"Single WAN":"No direct WAN"} · ${s.internetBreakout||"local"} breakout</p></div>
       ${s.notes?`<div class="inspector-section"><h3>Notes</h3><p>${escapeHtml(s.notes)}</p></div>`:""}
       <div class="inspector-actions"><button class="button primary" data-inspector-add-vlan="${s.id}" type="button">+ Add VLAN</button><button class="button secondary" data-recommend-vlan="${s.id}" type="button">✦ Recommend VLAN</button><button class="button ghost" data-edit-site="${s.id}" type="button">Edit</button><button class="button ghost" data-delete-site="${s.id}" type="button">Delete site</button></div></div>`;
   } else if(selected.type==="vlan"){
     const found=findVlan(selected.id);if(!found){selected=null;return renderInspector()}const {site,vlan:v}=found,p=safeParse(v.cidr),capacity=safeCapacity(v),over=p&&v.devices>capacity,head=p?Math.max(0,Math.round((1-v.devices/capacity)*100)):0;
-    root.innerHTML=`<div class="inspector-content"><p class="context-label">VLAN ${v.vid} · ${escapeHtml(v.role)}</p><h2>${escapeHtml(v.name)}</h2><p>Segment within ${escapeHtml(site.name)}.</p>
+    root.innerHTML=`<div class="inspector-content">${INSPECTOR_CLOSE}<p class="context-label">VLAN ${v.vid} · ${escapeHtml(v.role)}</p><h2>${escapeHtml(v.name)}</h2><p>Segment within ${escapeHtml(site.name)}.</p>
       <div class="detail-grid"><div class="detail"><span>IPv4 subnet</span><strong>${escapeHtml(v.cidr)}</strong></div><div class="detail"><span>Gateway</span><strong>${escapeHtml(v.gateway)}</strong></div><div class="detail"><span>Devices</span><strong>${v.devices}</strong></div><div class="detail"><span>Headroom</span><strong>${head}%</strong>${over?'<span class="status-pill error">Over capacity</span>':""}</div></div>
       <div class="inspector-section"><h3>DHCP and reservations</h3><p>${v.dhcpEnabled?`${escapeHtml(v.dhcpStart)} – ${escapeHtml(v.dhcpEnd)}`:"Static addressing"} · ${v.reserved||1} reserved address${(v.reserved||1)===1?"":"es"}</p></div>
       <div class="inspector-section"><h3>Best-practice note</h3><p>${roleAdvice(v.role)}</p></div>
@@ -192,7 +195,7 @@ function renderInspector(){
       <div class="inspector-actions"><button class="button ghost" data-edit-vlan="${v.id}" type="button">Edit</button><button class="button ghost" data-delete-vlan="${v.id}" type="button">Delete VLAN</button></div></div>`;
   } else {
     const l=state.links.find(x=>x.id===selected.id),a=l&&state.sites.find(s=>s.id===l.from),b=l&&state.sites.find(s=>s.id===l.to);if(!l||!a||!b){selected=null;return renderInspector()}
-    root.innerHTML=`<div class="inspector-content"><p class="context-label">WAN connection</p><h2>${escapeHtml(a.name)} to ${escapeHtml(b.name)}</h2><p>${linkLabel(l)} with ${l.resilience==="dual"?"redundant paths":"a single path"}.</p><div class="detail-grid"><div class="detail"><span>Type</span><strong>${linkLabel(l)}</strong></div><div class="detail"><span>Resilience</span><strong>${escapeHtml(l.resilience)}</strong></div><div class="detail"><span>Routing</span><strong>${escapeHtml(l.routingType||"static")}</strong></div><div class="detail"><span>Transit</span><strong>${l.transitAllowed===false?"blocked":"allowed"}</strong></div></div><div class="inspector-actions"><button class="button primary" data-trace-link="${l.id}" type="button">Trace path</button><button class="button ghost" data-edit-link="${l.id}" type="button">Edit</button><button class="button ghost" data-delete-link="${l.id}" type="button">Delete</button></div></div>`;
+    root.innerHTML=`<div class="inspector-content">${INSPECTOR_CLOSE}<p class="context-label">WAN connection</p><h2>${escapeHtml(a.name)} to ${escapeHtml(b.name)}</h2><p>${linkLabel(l)} with ${l.resilience==="dual"?"redundant paths":"a single path"}.</p><div class="detail-grid"><div class="detail"><span>Type</span><strong>${linkLabel(l)}</strong></div><div class="detail"><span>Resilience</span><strong>${escapeHtml(l.resilience)}</strong></div><div class="detail"><span>Routing</span><strong>${escapeHtml(l.routingType||"static")}</strong></div><div class="detail"><span>Transit</span><strong>${l.transitAllowed===false?"blocked":"allowed"}</strong></div></div><div class="inspector-actions"><button class="button primary" data-trace-link="${l.id}" type="button">Trace path</button><button class="button ghost" data-edit-link="${l.id}" type="button">Edit</button><button class="button ghost" data-delete-link="${l.id}" type="button">Delete</button></div></div>`;
   }
 }
 function connectionsFor(id){return state.links.filter(l=>l.from===id||l.to===id).length}
@@ -205,7 +208,7 @@ function renderAddressPlan(){
     ["Sites",state.sites.length],["VLANs",all.length],["Usable addresses",usable.toLocaleString()],["Planned devices",needed.toLocaleString()]
   ].map(([a,b])=>`<div class="summary-card"><span>${a}</span><strong>${b}</strong></div>`).join("");
   $("#address-table").innerHTML=all.length?all.map(({site,vlan:v,p})=>{
-    const capacity=safeCapacity(v),head=p?Math.round((1-v.devices/capacity)*100):0,status=!p?["Invalid","error"]:v.devices>capacity?["Over capacity","error"]:head<20?["Low headroom","warning"]:["Healthy",""];
+    const capacity=safeCapacity(v),head=p?Math.max(0,Math.round((1-v.devices/capacity)*100)):0,status=!p?["Invalid","error"]:v.devices>capacity?["Over capacity","error"]:head<20?["Low headroom","warning"]:["Healthy",""];
     return `<tr><td><strong>${escapeHtml(site.name)}</strong><br><small>${escapeHtml(v.name)}</small></td><td>${v.vid}</td><td><code>${escapeHtml(v.cidr)}</code></td><td><code>${escapeHtml(v.gateway)}</code></td><td>${v.devices}</td><td>${p?capacity:"Unavailable"}</td><td>${p?head+"%":"Unavailable"}</td><td><span class="status-pill ${status[1]}">${status[0]}</span></td></tr>`
   }).join(""):`<tr><td colspan="8">No VLANs have been added yet.</td></tr>`;
 }
@@ -527,6 +530,7 @@ document.addEventListener("click",e=>{
   if(utilityMenu?.open&&!utilityMenu.contains(e.target))utilityMenu.open=false;
   if(utilityCommand&&!utilityCommand.disabled)queueMicrotask(()=>{utilityMenu.open=false});
   const closeDialog=e.target.closest("[data-close-dialog]");if(closeDialog)return closeDialog.closest("dialog").close();
+  const closeInspector=e.target.closest("[data-inspector-close]");if(closeInspector){selected=null;render();return}
   if(e.target.closest("#home-button,.brand")){e.preventDefault();return showHome()}
   if(e.target.closest("#continue-design")){state.mode=state.mode||"existing";saveState();enterWorkspace();render();return}
   if(e.target.closest("#undo-button"))return restoreHistory(undoStack,redoStack);
@@ -569,11 +573,11 @@ document.addEventListener("click",e=>{
   const delLink=e.target.closest("[data-delete-link]");if(delLink&&confirm("Delete this connection?")){pushHistory();state.links=state.links.filter(l=>l.id!==delLink.dataset.deleteLink);selected=null;touch();return}
   const trace=e.target.closest("[data-trace-link]");if(trace)return animateTrace(trace.dataset.traceLink);
   if(e.target.closest("#close-trace"))return stopTrace();
-  if(e.target.closest("#rerun-review")){renderReview();showToast("Design review updated")}
+  if(e.target.closest("#rerun-review")){reviewCache=null;renderReview();showToast("Design review updated")}
 });
 document.addEventListener("keydown",e=>{
   if(e.key==="Escape"){const menu=$("#utility-menu");if(menu?.open){menu.open=false;menu.querySelector("summary").focus()}}
-  const node=e.target.closest?.(".topology-node"),row=e.target.closest?.(".site-row,.vlan-row");
+  const node=e.target.closest?.(".topology-node"),row=e.target.closest?.(".site-row,.vlan-row"),hit=e.target.closest?.(".link-hit");
   if(node&&["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(e.key)){
     e.preventDefault();const site=state.sites.find(s=>s.id===node.dataset.site);if(!site)return;
     if(e.key==="ArrowLeft")site.x=Math.max(0,site.x-2);
@@ -584,7 +588,7 @@ document.addEventListener("keydown",e=>{
     clearTimeout(touch.timer);touch.timer=setTimeout(saveState,220);
     return;
   }
-  if((node||row)&&["Enter"," "].includes(e.key)){e.preventDefault();selected=node?{type:"site",id:node.dataset.site}:row.dataset.vlan?{type:"vlan",id:row.dataset.vlan}:{type:"site",id:row.dataset.site};render();return}
+  if((node||row||hit)&&["Enter"," "].includes(e.key)){e.preventDefault();selected=node?{type:"site",id:node.dataset.site}:hit?{type:"link",id:hit.dataset.link}:row.dataset.vlan?{type:"vlan",id:row.dataset.vlan}:{type:"site",id:row.dataset.site};render();return}
   const tab=e.target.closest?.('[role="tab"]');if(tab&&["ArrowRight","ArrowDown","ArrowLeft","ArrowUp","Home","End"].includes(e.key)){e.preventDefault();const tabs=$$('[role="tab"]'),index=tabs.indexOf(tab),next=e.key==="Home"?0:e.key==="End"?tabs.length-1:e.key.includes("Right")||e.key.includes("Down")?(index+1)%tabs.length:(index-1+tabs.length)%tabs.length;activateView(tabs[next].dataset.view,true)}
 });
 $("#recommend-form").addEventListener("submit",e=>e.preventDefault());
