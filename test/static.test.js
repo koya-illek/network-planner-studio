@@ -55,3 +55,15 @@ test("health release version matches package.json", async () => {
   const worker = await readFile(new URL("worker.js", root), "utf8");
   assert.ok(worker.includes(`version: "${pkg.version}"`), "worker health payload must report the package.json version");
 });
+
+test("round-2 affordances stay wired: motion, touch, live errors, keyboard links, inspector close", async () => {
+  const css = await readFile(new URL("public/styles.css", root), "utf8");
+  const html = await readFile(new URL("public/index.html", root), "utf8");
+  const app = await readFile(new URL("public/app.js", root), "utf8");
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(css, /@media \(pointer: coarse\)/);
+  const liveErrors = (html.match(/class="form-error" aria-live="polite"/g) ?? []).length;
+  assert.ok(liveErrors >= 6, "every form-error region must be a live region");
+  assert.ok(app.includes('e.target.closest?.(".link-hit")') && app.includes('{type:"link",id:hit.dataset.link}'), "canvas links must be keyboard-reachable");
+  assert.ok(app.includes("[data-inspector-close]"), "inspector overlay must have a close affordance");
+});
