@@ -67,3 +67,19 @@ test("round-2 affordances stay wired: motion, touch, live errors, keyboard links
   assert.ok(app.includes('e.target.closest?.(".link-hit")') && app.includes('{type:"link",id:hit.dataset.link}'), "canvas links must be keyboard-reachable");
   assert.ok(app.includes("[data-inspector-close]"), "inspector overlay must have a close affordance");
 });
+
+test("round-3 safeguards stay wired: native keyboard activation, tolerant revival, growth editing, trace-safe resize", async () => {
+  const app = await readFile(new URL("public/app.js", root), "utf8");
+  const html = await readFile(new URL("public/index.html", root), "utf8");
+  assert.ok(
+    app.includes('!e.target.closest?.("button,a,input,select,textarea")'),
+    "Enter/Space handling must not hijack native controls inside rows"
+  );
+  assert.match(app, /function reviveDesign\(raw\)\{try\{return migrateDesign\(raw\)\}catch\{return migrateDesign\(raw,\{strict:false\}\)\}\}/, "internal state revival must fall back to lenient migration");
+  assert.ok((app.match(/reviveDesign\(/g) ?? []).length >= 4, "undo/redo, duplicate and library open must use tolerant revival");
+  assert.match(app, /data-dynamic-growth/, "site dialog must preserve off-list growth allowances");
+  assert.ok(app.includes('resizeFrame=requestAnimationFrame(renderCanvas)'), "resize relayout must be coalesced and trace-safe");
+  assert.match(app, /aria-label="Design score \$\{score\} out of 100"/, "score ring needs an accessible name");
+  assert.match(html, /<aside id="inspector"[^>]*tabindex="-1"/, "inspector must be focusable for focus restoration");
+  assert.match(html, /property="og:site_name"/);
+});
