@@ -42,6 +42,7 @@ let panDrag = null;
 let canvasDirty = false;
 let activePointers = new Map();
 let pinch = null;
+let nudgeBurstAt = 0;
 
 function blankState() {
   return {schema:SCHEMA_ID,version:SCHEMA_VERSION,projectId:uid(),name:"Untitled network",mode:null,topologyMode:"custom",policies:{spokeToSpoke:"via-hub",centralizedInspection:false,secondaryHubId:null},flowPolicies:{},assumptions:[],sites:[],links:[],updatedAt:new Date().toISOString()};
@@ -645,12 +646,16 @@ document.addEventListener("keydown",e=>{
   const node=e.target.closest?.(".topology-node"),row=e.target.closest?.(".site-row,.vlan-row"),hit=e.target.closest?.(".link-hit");
   if(node&&e.target===node&&["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(e.key)){
     e.preventDefault();const site=state.sites.find(s=>s.id===node.dataset.site);if(!site)return;
+    // One undo entry per nudge burst, so keyboard moves match pointer drags.
+    const now=Date.now();
+    if(now-nudgeBurstAt>600){pushHistory();updateHistoryButtons()}
+    nudgeBurstAt=now;
     if(e.key==="ArrowLeft")site.x=Math.max(0,site.x-2);
     if(e.key==="ArrowRight")site.x=Math.min(82,site.x+2);
     if(e.key==="ArrowUp")site.y=Math.max(0,site.y-2);
     if(e.key==="ArrowDown")site.y=Math.min(84,site.y+2);
     renderCanvas();$(`.topology-node[data-site="${site.id}"]`)?.focus();
-    clearTimeout(touch.timer);touch.timer=setTimeout(saveState,220);
+    touch();
     return;
   }
   if((node||row||hit)&&!e.target.closest?.("button,a,input,select,textarea")&&["Enter"," "].includes(e.key)){e.preventDefault();selected=node?{type:"site",id:node.dataset.site}:hit?{type:"link",id:hit.dataset.link}:row.dataset.vlan?{type:"vlan",id:row.dataset.vlan}:{type:"site",id:row.dataset.site};render();return}

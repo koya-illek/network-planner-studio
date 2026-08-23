@@ -375,6 +375,26 @@ test("settles a moved node drag when a pinch takes over", async ({ page }) => {
   expect(await storedX()).toBeGreaterThan(before);
 });
 
+test("makes an arrow-key nudge burst undoable and redoable", async ({ page }) => {
+  const node = page.locator(".topology-node").first();
+  await node.waitFor();
+  const storedX = () => page.evaluate(() => JSON.parse(localStorage.getItem("network-planner-studio.v1")).sites[0].x);
+  await node.focus();
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowRight");
+  await expect(page.locator("#undo-button")).toBeEnabled();
+  await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+  const moved = await storedX();
+  expect(moved).toBeGreaterThan(42);
+  await page.locator("#utility-menu > summary").click();
+  await page.locator("#undo-button").click();
+  expect(await storedX()).toBe(42);
+  await page.locator("#utility-menu > summary").click();
+  await page.locator("#redo-button").click();
+  expect(await storedX()).toBe(moved);
+});
+
 test("keeps focus recoverable when a background save-render lands during a dialog", async ({ page }) => {
   await page.locator(".add-vlan-mini").first().focus();
   await page.keyboard.press("Enter");
