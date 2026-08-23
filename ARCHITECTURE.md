@@ -109,7 +109,8 @@ There is no runtime database, analytics service, authentication provider, remote
 - Site names, IP ranges, policies, assumptions, and implementation notes are not sent to an application backend during normal planning.
 - Imports are untrusted input and are schema-validated before use. JSON and CSV imports above 10 MB are rejected before parsing.
 - Dynamic values are escaped or enum-constrained before rendering.
-- Storage failure is reported to the user rather than silently discarding changes.
+- Storage failure is reported to the user rather than silently discarding changes. An unreadable stored blob is quarantined under a `.unreadable` key before any later save can overwrite it.
+- The pending debounced save flushes on `pagehide` and when the tab is backgrounded, so mobile cannot park unsaved edits indefinitely.
 - Exported files become the user's responsibility once downloaded or shared.
 - CSV import accepts RFC 4180 quoted commas, escaped quotes, and multiline fields. Exported cells use a reversible spreadsheet-formula guard, including values with a legitimate leading apostrophe and formulas hidden behind whitespace.
 - Animation respects `prefers-reduced-motion`: hero flow lines, pulse indicators and trace particles are disabled when reduced motion is requested.
@@ -146,6 +147,7 @@ One Cloudflare Worker serves `network.illek.ie` and the compatibility hostname `
 - Landmarks, skip link, roving-tabindex tabs, keyboard-operable rows, nodes and WAN links, live form errors, and focus preservation across selection re-renders keep the planner operable without a pointer. Focus keeping also covers dialog-driven edits from inspector actions and the per-site VLAN shortcut, falling back to the inspector container when the originating control no longer exists. The topology canvas is a named region so its label reaches screen readers.
 - The mobile Sites drawer keeps `aria-expanded` truthful across every close path, including selecting a site or VLAN from the drawer itself.
 - Touch targets meet 44 px on coarse pointers; reduced-motion preferences disable decorative animation.
+- Canvas status is not colour-only: unhealthy sites carry a text flag and their accessible name names the severity, connection labels announce transport type and resilience in words, trace progress is a live region, and Escape clears the inspector selection.
 - On touch screens the canvas claims its gestures with `touch-action: none`, two-finger pinch zooms within the same clamped range as the zoom controls, and a cancelled or interrupted gesture aborts cleanly instead of leaving a stuck drag. A cancelled node drag also returns the site to its pre-drag position. Consecutive arrow-key nudges of one node record one undo entry; moving another node or using undo or redo starts a new history entry.
 
 ## Non-goals
