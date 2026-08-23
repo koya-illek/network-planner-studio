@@ -753,7 +753,12 @@ function releasePointer(e,commit){
   if(!commit)panDrag=null;
   if(!drag)return;
   if(commit&&drag.moved)touch();
-  else{undoStack.pop();updateHistoryButtons();if(commit){selected={type:"site",id:drag.site.id};render()}}
+  else{
+    // A cancelled gesture never happened: put the node back where the drag
+    // found it before dropping the history snapshot.
+    if(!commit){drag.site.x=drag.x;drag.site.y=drag.y;if(drag.moved)renderCanvas()}
+    undoStack.pop();updateHistoryButtons();if(commit){selected={type:"site",id:drag.site.id};render()}
+  }
   drag=null;
 }
 $("#canvas").addEventListener("pointerup",e=>releasePointer(e,true));

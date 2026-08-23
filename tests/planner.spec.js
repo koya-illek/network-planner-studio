@@ -335,6 +335,23 @@ test("pinch-zooms the canvas on touch and aborts cancelled gestures", async ({ p
   expect(pageErrors).toEqual([]);
 });
 
+test("restores a dragged node when the gesture is cancelled", async ({ page }) => {
+  await page.locator(".topology-node").first().waitFor();
+  const nodeLeft = () => page.evaluate(() => Math.round(document.querySelector(".topology-node").getBoundingClientRect().left));
+  const origin = await nodeLeft();
+  await page.evaluate(() => {
+    const canvas = document.querySelector("#canvas");
+    const nb = document.querySelector(".topology-node").getBoundingClientRect();
+    const mk = (type, x, y) => new PointerEvent(type, { bubbles: true, cancelable: type !== "pointercancel", pointerId: 11, pointerType: "touch", isPrimary: true, clientX: x, clientY: y });
+    document.elementFromPoint(nb.left + 10, nb.top + 10).dispatchEvent(mk("pointerdown", nb.left + 10, nb.top + 10));
+    for (let i = 1; i <= 8; i++) canvas.dispatchEvent(mk("pointermove", nb.left + 10 + i * 6, nb.top + 10));
+    canvas.dispatchEvent(new PointerEvent("pointercancel", { bubbles: true, cancelable: false, pointerId: 11, pointerType: "touch", isPrimary: true }));
+  });
+  await page.waitForTimeout(60);
+  expect(Math.abs((await nodeLeft()) - origin)).toBeLessThanOrEqual(1);
+  await expect(page.locator("#undo-button")).toBeDisabled();
+});
+
 test("keeps focus recoverable when a background save-render lands during a dialog", async ({ page }) => {
   await page.locator(".add-vlan-mini").first().focus();
   await page.keyboard.press("Enter");
