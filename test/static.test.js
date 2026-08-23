@@ -78,8 +78,24 @@ test("round-3 safeguards stay wired: native keyboard activation, tolerant reviva
   assert.match(app, /function reviveDesign\(raw\)\{try\{return migrateDesign\(raw\)\}catch\{return migrateDesign\(raw,\{strict:false\}\)\}\}/, "internal state revival must fall back to lenient migration");
   assert.ok((app.match(/reviveDesign\(/g) ?? []).length >= 4, "undo/redo, duplicate and library open must use tolerant revival");
   assert.match(app, /data-dynamic-growth/, "site dialog must preserve off-list growth allowances");
-  assert.ok(app.includes('resizeFrame=requestAnimationFrame(renderCanvas)'), "resize relayout must be coalesced and trace-safe");
+  assert.ok(app.includes('resizeFrame=requestAnimationFrame(renderCanvas)') === false && app.includes("resizeFrame=requestAnimationFrame(()=>{const keeper=focusKeeper();renderCanvas();restoreFocus(keeper)})"), "resize relayout must be coalesced, trace-safe and keep node focus");
   assert.match(app, /aria-label="Design score \$\{score\} out of 100"/, "score ring needs an accessible name");
   assert.match(html, /<aside id="inspector"[^>]*tabindex="-1"/, "inspector must be focusable for focus restoration");
   assert.match(html, /property="og:site_name"/);
+});
+
+test("iteration-4 keeps keyboard focus across selection, policy and resize re-renders", async () => {
+  const app = await readFile(new URL("public/app.js", root), "utf8");
+  assert.match(app, /function focusKeeper\(\)/, "render passes must capture focused element identity");
+  assert.match(app, /function restoreFocus\(keeper\)/, "focus restoration helper must exist");
+  assert.ok((app.match(/restoreFocus\(keeper\)/g) ?? []).length >= 3, "render() and the resize relayout must both restore focus");
+});
+
+test("iteration-4 sets cross-origin isolation headers", async () => {
+  const worker = await readFile(new URL("worker.js", root), "utf8");
+  const headers = await readFile(new URL("public/_headers", root), "utf8");
+  for (const header of ["Cross-Origin-Opener-Policy", "Cross-Origin-Resource-Policy"]) {
+    assert.ok(worker.includes(`"${header}": "same-origin"`), `${header} must be set by the worker`);
+    assert.ok(headers.includes(header), `${header} must be mirrored in _headers`);
+  }
 });

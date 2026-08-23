@@ -1,5 +1,7 @@
 const SECURITY_HEADERS = {
   "Content-Security-Policy": "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' data:; connect-src 'self' https://cloudflareinsights.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+  "Cross-Origin-Opener-Policy": "same-origin",
+  "Cross-Origin-Resource-Policy": "same-origin",
   "Referrer-Policy": "strict-origin-when-cross-origin",
   "X-Content-Type-Options": "nosniff",
   "X-Frame-Options": "DENY",
@@ -21,7 +23,7 @@ export default {
       headers.set("Allow", "GET, HEAD, OPTIONS");
       if (request.method === "OPTIONS") return new Response(null, { status: 204, headers });
       if (!["GET", "HEAD"].includes(request.method)) return Response.json({ ok: false, error: "method_not_allowed" }, { status: 405, headers });
-      const body = JSON.stringify({ ok: true, service: "network-planner-studio", version: "0.3.0", schema: "network-planner-studio/design", schemaVersion: 3 });
+      const body = JSON.stringify({ ok: true, service: "network-planner-studio", version: "0.4.0", schema: "network-planner-studio/design", schemaVersion: 3 });
       headers.set("Content-Type", "application/json; charset=utf-8");
       return new Response(request.method === "HEAD" ? null : body, { status: 200, headers });
     }
