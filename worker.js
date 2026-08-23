@@ -24,7 +24,7 @@ export default {
       headers.set("Cache-Control", "no-store");
       if (request.method === "OPTIONS") return new Response(null, { status: 204, headers });
       if (!["GET", "HEAD"].includes(request.method)) return Response.json({ ok: false, error: "method_not_allowed" }, { status: 405, headers });
-      const body = JSON.stringify({ ok: true, service: "network-planner-studio", version: "0.6.0", schema: "network-planner-studio/design", schemaVersion: 3 });
+      const body = JSON.stringify({ ok: true, service: "network-planner-studio", version: "0.7.0", schema: "network-planner-studio/design", schemaVersion: 3 });
       headers.set("Content-Type", "application/json; charset=utf-8");
       return new Response(request.method === "HEAD" ? null : body, { status: 200, headers });
     }

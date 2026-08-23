@@ -85,6 +85,7 @@ Every entry path uses shared factories and validators. Manual forms, recommendat
 - Route intent accepts `/0` through `/32`.
 - `/31` is supported for point-to-point transit.
 - Network and broadcast addresses, gateways, reservations, and explicit pools are validated by subnet type.
+- Editing a VLAN keeps its stored gateway whenever it remains a usable host for the subnet and role; otherwise the planner falls back to the first usable address.
 - Duplicate IDs and duplicate VLAN IDs inside one site are rejected.
 - Existing address space is preserved unless the user deliberately changes it.
 
@@ -133,13 +134,14 @@ One Cloudflare Worker serves `network.illek.ie` and the compatibility hostname `
 
 - Invalid input is rejected or quarantined with visible warnings.
 - Browser-storage failure leaves the current in-memory design available and shows recovery guidance.
+- If the same design is open in two browser tabs, a save from one tab warns the other instead of merging; storage holds whichever tab wrote last, so the warned tab should reload or pick a version through Projects.
 - A missing network path produces an unavailable trace rather than an invented route.
 - Import migration preserves recoverable legacy data and reports bounded corrections.
 - The application continues to work without storage, although projects will not persist after the session.
 
 ## Accessibility model
 
-- Landmarks, skip link, roving-tabindex tabs, keyboard-operable rows, nodes and WAN links, live form errors, and focus preservation across selection re-renders keep the planner operable without a pointer. Focus keeping also covers dialog-driven edits from inspector actions and the per-site VLAN shortcut, falling back to the inspector container when the originating control no longer exists.
+- Landmarks, skip link, roving-tabindex tabs, keyboard-operable rows, nodes and WAN links, live form errors, and focus preservation across selection re-renders keep the planner operable without a pointer. Focus keeping also covers dialog-driven edits from inspector actions and the per-site VLAN shortcut, falling back to the inspector container when the originating control no longer exists. The topology canvas is a named region so its label reaches screen readers.
 - The mobile Sites drawer keeps `aria-expanded` truthful across every close path, including selecting a site or VLAN from the drawer itself.
 - Touch targets meet 44 px on coarse pointers; reduced-motion preferences disable decorative animation.
 
