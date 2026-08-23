@@ -99,3 +99,18 @@ test("iteration-4 sets cross-origin isolation headers", async () => {
     assert.ok(headers.includes(header), `${header} must be mirrored in _headers`);
   }
 });
+
+test("iteration-5 keeps local dev off the production redirect path", async () => {
+  const pkg = JSON.parse(await readFile(new URL("package.json", root), "utf8"));
+  assert.ok(
+    pkg.scripts.dev.includes("--local") && pkg.scripts.dev.includes("--host 127.0.0.1"),
+    "npm run dev must pin the local host or wrangler route simulation loops on the http->https upgrade"
+  );
+});
+
+test("iteration-5 marks the health endpoint uncacheable without touching asset caching", async () => {
+  const worker = await readFile(new URL("worker.js", root), "utf8");
+  const securityBlock = worker.slice(worker.indexOf("SECURITY_HEADERS"), worker.indexOf("export default"));
+  assert.ok(!securityBlock.includes("Cache-Control"), "shared security headers must not disable asset caching");
+  assert.ok(worker.includes('headers.set("Cache-Control", "no-store")'), "health responses must be no-store");
+});

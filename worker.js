@@ -21,9 +21,11 @@ export default {
       const headers = new Headers(SECURITY_HEADERS);
       headers.set("X-Robots-Tag", "noindex, nofollow");
       headers.set("Allow", "GET, HEAD, OPTIONS");
+      // Health carries release provenance; no intermediary may serve it stale.
+      headers.set("Cache-Control", "no-store");
       if (request.method === "OPTIONS") return new Response(null, { status: 204, headers });
       if (!["GET", "HEAD"].includes(request.method)) return Response.json({ ok: false, error: "method_not_allowed" }, { status: 405, headers });
-      const body = JSON.stringify({ ok: true, service: "network-planner-studio", version: "0.4.0", schema: "network-planner-studio/design", schemaVersion: 3 });
+      const body = JSON.stringify({ ok: true, service: "network-planner-studio", version: "0.5.0", schema: "network-planner-studio/design", schemaVersion: 3 });
       headers.set("Content-Type", "application/json; charset=utf-8");
       return new Response(request.method === "HEAD" ? null : body, { status: 200, headers });
     }
