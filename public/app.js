@@ -703,6 +703,8 @@ $("#canvas").addEventListener("pointermove",e=>{
 $("#canvas").addEventListener("pointerup",()=>{if(panDrag){panDrag=null;return}if(!drag)return;if(drag.moved)touch();else{undoStack.pop();updateHistoryButtons();selected={type:"site",id:drag.site.id};render()}drag=null});
 $("#canvas").addEventListener("wheel",e=>{if(!e.ctrlKey)return;e.preventDefault();canvasZoom=Math.max(.7,Math.min(1.5,canvasZoom+(e.deltaY<0?.1:-.1)));applyCanvasZoom()},{passive:false});
 let resizeFrame=null;window.addEventListener("resize",()=>{stopTrace();cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(()=>{const keeper=focusKeeper();renderCanvas();restoreFocus(keeper)})});
+// A debounced save must not die with the tab: flush it when the page goes away.
+window.addEventListener("pagehide",()=>{if(touch.timer){clearTimeout(touch.timer);touch.timer=null;saveState()}});
 
 function findVlan(id){for(const site of state.sites){const vlan=site.vlans.find(v=>v.id===id);if(vlan)return{site,vlan}}return null}
 function safeParse(cidr){try{return parseCidr(cidr)}catch{return null}}

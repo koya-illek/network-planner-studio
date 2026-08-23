@@ -171,6 +171,15 @@ test("keeps keyboard focus after dialog-driven edits", async ({ page }) => {
   await expect.poll(() => page.evaluate(() => document.activeElement.id || document.activeElement.className)).toBe("inspector");
 });
 
+test("flushes a pending debounced save when the page is hidden", async ({ page }) => {
+  await page.locator("#project-name-button").click();
+  await page.locator("#name-form input[name=name]").fill("Flush test");
+  await page.locator("#name-form button[type=submit]").click();
+  await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("network-planner-studio.v1")).name);
+  expect(stored).toBe("Flush test");
+});
+
 test("relayouts the canvas after edits made from other tabs", async ({ page }) => {
   const nodeBox = () => page.evaluate(() => {
     const canvas = document.querySelector("#canvas").getBoundingClientRect();

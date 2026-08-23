@@ -114,3 +114,8 @@ test("iteration-5 marks the health endpoint uncacheable without touching asset c
   assert.ok(!securityBlock.includes("Cache-Control"), "shared security headers must not disable asset caching");
   assert.ok(worker.includes('headers.set("Cache-Control", "no-store")'), "health responses must be no-store");
 });
+
+test("iteration-6 flushes pending saves on pagehide", async () => {
+  const app = await readFile(new URL("public/app.js", root), "utf8");
+  assert.match(app, /window\.addEventListener\("pagehide",\(\)=>\{if\(touch\.timer\)\{clearTimeout\(touch\.timer\);touch\.timer=null;saveState\(\)\}\}\)/, "the debounce window must not swallow the last edit on tab close");
+});
