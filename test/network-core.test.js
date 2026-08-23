@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   parseCidr,rangesOverlap,contains,endpointCapacity,prefixForDevices,nextSubnet,
-  suggestSiteRange,isPrivateCidr,isPrivateRoutePrefix,shortestPath,migrateDesign,defaultDhcpPool,validHostInSubnet,parseRoutePrefix,validateGateway,validateDhcpPool,validateDesign,guardCsvCell,unguardCsvCell,SCHEMA_ID,SCHEMA_VERSION
+  suggestSiteRange,isPrivateCidr,isPrivateRoutePrefix,shortestPath,migrateDesign,defaultDhcpPool,validHostInSubnet,parseRoutePrefix,validateGateway,validateDhcpPool,validateDesign,guardCsvCell,unguardCsvCell,intToIp,SCHEMA_ID,SCHEMA_VERSION
 } from "../public/network-core.js";
 
 test("parses LAN and point-to-point IPv4 networks",()=>{
@@ -34,6 +34,52 @@ test("builds a DHCP pool that excludes reserved addresses and the gateway",()=>{
 
 test("allocates the next aligned free subnet",()=>{
   assert.equal(nextSubnet("10.0.0.0/16",24,["10.0.0.0/24","10.0.1.0/24"]),"10.0.2.0/24");
+});
+
+test("nextSubnet handles partial overlaps, unsorted entries and exhausted ranges",()=>{
+  assert.equal(nextSubnet("10.0.0.0/16",24,[]),"10.0.0.0/24");
+  assert.equal(nextSubnet("10.0.0.0/16",24,["10.0.0.128/25","10.0.0.0/25"]),"10.0.1.0/24");
+  assert.equal(nextSubnet("10.0.0.0/16",24,["10.0.2.0/24","10.0.0.0/24"]),"10.0.1.0/24");
+  assert.equal(nextSubnet("10.0.0.0/24",26,["not-a-cidr","10.0.0.0/33"]),"10.0.0.0/26");
+  assert.equal(nextSubnet("10.0.0.0/24",30,["10.0.0.8/30","10.0.0.0/30","10.0.0.4/30"]),"10.0.0.12/30");
+  assert.throws(()=>nextSubnet("10.0.0.0/24",24,["10.0.0.0/24"]),/No suitable free subnet remains/);
+  assert.throws(()=>nextSubnet("10.0.0.0/24",23,[]),/Required subnet prefix/);
+});
+
+test("nextSubnet matches the legacy candidate scan across randomized allocations",()=>{
+  const legacy=(parentCidr,prefix,occupied)=>{
+    const parent=parseCidr(parentCidr),size=2**(32-prefix);
+    for(let network=parent.network;network+size-1<=parent.broadcast;network+=size){
+      const candidate=`${intToIp(network)}/${prefix}`;
+      if(!occupied.some(value=>rangesOverlap(candidate,value)))return candidate;
+    }
+    return null;
+  };
+  let seed=42;
+  const rand=()=>{seed=(seed*1103515245+12345)>>>0;return seed/2**32};
+  for(let round=0;round<300;round++){
+    const parentPrefix=[16,20,22,24][Math.floor(rand()*4)];
+    const prefix=parentPrefix+Math.floor(rand()*(31-parentPrefix+1));
+    const parent=`10.${Math.floor(rand()*255)}.0.0/${parentPrefix}`;
+    const occupied=[];
+    for(let i=0,n=Math.floor(rand()*6);i<n;i++){
+      if(rand()<.15){occupied.push(`garbage-${i}`);continue}
+      try{
+        const subnet=nextSubnet(parent,prefix+ (rand()<.3?1:0),occupied);
+        occupied.push(subnet);
+      }catch{/* range full; stop filling */}
+    }
+    let result;
+    try{result=nextSubnet(parent,prefix,occupied)}catch{result=null}
+    assert.equal(result,legacy(parent,prefix,occupied),`mismatch for ${parent} /${prefix} with ${JSON.stringify(occupied)}`);
+  }
+});
+
+test("allocating a /31 inside a sparsely blocked /8 stays fast",()=>{
+  const start=Date.now();
+  const result=nextSubnet("10.0.0.0/8",31,["10.255.0.0/16"]);
+  assert.equal(result,"10.0.0.0/31");
+  assert.ok(Date.now()-start<400,"nextSubnet must not scan the whole parent range");
 });
 
 test("suggested site blocks are private and non-overlapping",()=>{

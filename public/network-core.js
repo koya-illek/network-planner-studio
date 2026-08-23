@@ -204,11 +204,25 @@ export function nextSubnet(parentCidr, prefix, occupied = []) {
   const parent = parseCidr(parentCidr);
   if (!Number.isInteger(Number(prefix)) || Number(prefix) < parent.prefix || Number(prefix) > 31) throw new Error("Required subnet prefix must fit inside the site range and use /8 through /31");
   const normalizedPrefix = Number(prefix), size = 2 ** (32 - normalizedPrefix);
-  for (let network = parent.network; network + size - 1 <= parent.broadcast; network += size) {
-    const candidate = `${intToIp(network)}/${normalizedPrefix}`;
-    if (!occupied.some(value => rangesOverlap(candidate, value))) return candidate;
+  // Parse each occupied allocation once, then walk the gaps numerically. The
+  // previous candidate-by-candidate scan reparsed CIDR strings for every
+  // (candidate, occupied) pair, stalling large parent ranges.
+  const ranges = [];
+  for (const value of Array.isArray(occupied) ? occupied : []) {
+    try {
+      const parsed = parseCidr(value);
+      ranges.push([parsed.network, parsed.broadcast]);
+    } catch { /* unparseable entries never blocked a candidate */ }
   }
-  throw new Error("No suitable free subnet remains in this site range");
+  ranges.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  let candidate = parent.network;
+  for (const [start, end] of ranges) {
+    if (end < candidate) continue;
+    if (start > candidate + size - 1) break;
+    candidate = Math.ceil((end + 1) / size) * size;
+  }
+  if (candidate + size - 1 > parent.broadcast) throw new Error("No suitable free subnet remains in this site range");
+  return `${intToIp(candidate)}/${normalizedPrefix}`;
 }
 
 export function suggestSiteRange(occupied = [], devices = 50) {
