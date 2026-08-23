@@ -40,6 +40,8 @@ let canvasZoom = 1;
 let canvasPan = {x:0,y:0};
 let panDrag = null;
 let canvasDirty = false;
+let activePointers = new Map();
+let pinch = null;
 
 function blankState() {
   return {schema:SCHEMA_ID,version:SCHEMA_VERSION,projectId:uid(),name:"Untitled network",mode:null,topologyMode:"custom",policies:{spokeToSpoke:"via-hub",centralizedInspection:false,secondaryHubId:null},flowPolicies:{},assumptions:[],sites:[],links:[],updatedAt:new Date().toISOString()};
@@ -695,16 +697,54 @@ function animateTrace(linkId){
 function stopTrace(){clearTimeout(traceTimer);traceTimer=null;$("#trace-bar").classList.add("hidden");$("#trace-particle")?.remove();$$(".route-particle").forEach(p=>p.remove());$$(".topology-node").forEach(n=>n.classList.remove("trace-active"))}
 function applyCanvasZoom(){for(const el of [$("#link-layer"),$("#node-layer")]){el.style.transform=`translate(${canvasPan.x}px,${canvasPan.y}px) scale(${canvasZoom})`;el.style.transformOrigin="center center"}}
 
+function capturePointer(e){try{e.currentTarget.setPointerCapture(e.pointerId)}catch{}}
 $("#canvas").addEventListener("pointerdown",e=>{
-  const node=e.target.closest(".topology-node");if(!node){if(currentTool==="select"){panDrag={startX:e.clientX,startY:e.clientY,x:canvasPan.x,y:canvasPan.y};$("#canvas").setPointerCapture(e.pointerId)}return}const site=state.sites.find(s=>s.id===node.dataset.site);if(!site)return;
-  pushHistory();drag={site,node,startX:e.clientX,startY:e.clientY,x:site.x,y:site.y,moved:false};node.setPointerCapture(e.pointerId);
+  activePointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(activePointers.size===2){
+    if(drag&&!drag.moved){undoStack.pop();updateHistoryButtons()}
+    drag=null;panDrag=null;
+    const [a,b]=activePointers.values();
+    pinch={dist:Math.hypot(a.x-b.x,a.y-b.y)||1,zoom:canvasZoom};
+    return;
+  }
+  if(activePointers.size>2)return;
+  const node=e.target.closest(".topology-node");
+  if(!node){if(currentTool==="select"){panDrag={startX:e.clientX,startY:e.clientY,x:canvasPan.x,y:canvasPan.y};capturePointer(e)}return}
+  const site=state.sites.find(s=>s.id===node.dataset.site);if(!site)return;
+  pushHistory();drag={site,node,startX:e.clientX,startY:e.clientY,x:site.x,y:site.y,moved:false};capturePointer(e);
 });
 $("#canvas").addEventListener("pointermove",e=>{
+  if(activePointers.has(e.pointerId))activePointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pinch&&activePointers.size>=2){
+    const [a,b]=[...activePointers.values()].slice(0,2),dist=Math.hypot(a.x-b.x,a.y-b.y)||1;
+    canvasZoom=Math.max(.7,Math.min(1.5,pinch.zoom*dist/pinch.dist));
+    return applyCanvasZoom();
+  }
   if(panDrag){canvasPan={x:panDrag.x+e.clientX-panDrag.startX,y:panDrag.y+e.clientY-panDrag.startY};applyCanvasZoom();return}
   if(!drag)return;const canvas=$("#canvas"),dx=(e.clientX-drag.startX)/canvasZoom,dy=(e.clientY-drag.startY)/canvasZoom;if(Math.abs(dx)+Math.abs(dy)>3)drag.moved=true;
   drag.site.x=Math.max(0,Math.min(82,drag.x+dx/canvas.clientWidth*100));drag.site.y=Math.max(0,Math.min(84,drag.y+dy/canvas.clientHeight*100));renderCanvas();
 });
-$("#canvas").addEventListener("pointerup",()=>{if(panDrag){panDrag=null;return}if(!drag)return;if(drag.moved)touch();else{undoStack.pop();updateHistoryButtons();selected={type:"site",id:drag.site.id};render()}drag=null});
+function releasePointer(e,commit){
+  const wasPinch=pinch;
+  activePointers.delete(e.pointerId);
+  if(wasPinch){
+    if(activePointers.size<2){
+      pinch=null;
+      const remaining=[...activePointers.values()][0];
+      if(commit&&remaining)panDrag={startX:remaining.x,startY:remaining.y,x:canvasPan.x,y:canvasPan.y};
+      else panDrag=null;
+    }
+    return;
+  }
+  if(commit&&panDrag){panDrag=null;return}
+  if(!commit)panDrag=null;
+  if(!drag)return;
+  if(commit&&drag.moved)touch();
+  else{undoStack.pop();updateHistoryButtons();if(commit){selected={type:"site",id:drag.site.id};render()}}
+  drag=null;
+}
+$("#canvas").addEventListener("pointerup",e=>releasePointer(e,true));
+$("#canvas").addEventListener("pointercancel",e=>releasePointer(e,false));
 $("#canvas").addEventListener("wheel",e=>{if(!e.ctrlKey)return;e.preventDefault();canvasZoom=Math.max(.7,Math.min(1.5,canvasZoom+(e.deltaY<0?.1:-.1)));applyCanvasZoom()},{passive:false});
 let resizeFrame=null;window.addEventListener("resize",()=>{stopTrace();cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(()=>{const keeper=focusKeeper();renderCanvas();restoreFocus(keeper)})});
 // A debounced save must not die with the tab: flush it when the page goes away.

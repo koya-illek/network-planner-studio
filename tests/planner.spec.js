@@ -279,3 +279,58 @@ test("keeps keyboard focus when selection and policy edits re-render", async ({ 
   await page.keyboard.press("Enter");
   await expect(page.locator("#mobile-sites-button")).toBeFocused();
 });
+test("pinch-zooms the canvas on touch and aborts cancelled gestures", async ({ page }) => {
+  const pageErrors = [];
+  page.on("pageerror", error => pageErrors.push(String(error)));
+  const transform = () => page.locator("#link-layer").evaluate(el => el.style.transform || "");
+  await page.locator(".topology-node").first().waitFor();
+  expect(await transform()).toBe("");
+
+  await page.evaluate(() => {
+    const canvas = document.querySelector("#canvas");
+    const box = canvas.getBoundingClientRect();
+    const cx = box.left + box.width / 2, cy = box.top + box.height / 2;
+    const mk = (type, id, x, y) => new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: id, pointerType: "touch", isPrimary: id === 5, clientX: x, clientY: y });
+    canvas.dispatchEvent(mk("pointerdown", 5, cx - 60, cy));
+    canvas.dispatchEvent(mk("pointerdown", 6, cx + 60, cy));
+    for (let i = 1; i <= 10; i++) {
+      canvas.dispatchEvent(mk("pointermove", 5, cx - 60 - i * 4, cy));
+      canvas.dispatchEvent(mk("pointermove", 6, cx + 60 + i * 4, cy));
+    }
+    canvas.dispatchEvent(mk("pointerup", 5, cx - 100, cy));
+    canvas.dispatchEvent(mk("pointerup", 6, cx + 100, cy));
+  });
+  const zoomed = Number(((await transform()).match(/scale\(([\d.]+)\)/) || [])[1]);
+  expect(zoomed).toBeGreaterThan(1.2);
+  await page.locator("#zoom-fit").click();
+  expect(await transform()).toContain("scale(1)");
+
+  const node = page.locator(".topology-node").first();
+  await page.waitForTimeout(250);
+  const dragStart = await page.evaluate(() => {
+    const canvas = document.querySelector("#canvas");
+    const nb = document.querySelector(".topology-node").getBoundingClientRect();
+    const mk = (type, x, y) => new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 7, pointerType: "touch", isPrimary: true, clientX: x, clientY: y });
+    document.elementFromPoint(nb.left + 10, nb.top + 10).dispatchEvent(mk("pointerdown", nb.left + 10, nb.top + 10));
+    for (let i = 1; i <= 8; i++) canvas.dispatchEvent(mk("pointermove", nb.left + 10 + i * 6, nb.top + 10));
+    canvas.dispatchEvent(mk("pointerup", nb.left + 58, nb.top + 10));
+    return nb.left;
+  });
+  expect((await node.boundingBox()).x).toBeGreaterThan(dragStart + 5);
+
+  const cancelProbe = await page.evaluate(() => {
+    const canvas = document.querySelector("#canvas");
+    const nb = document.querySelector(".topology-node").getBoundingClientRect();
+    const mk = (type, x, y) => new PointerEvent(type, { bubbles: true, cancelable: type !== "pointercancel", pointerId: 9, pointerType: "touch", isPrimary: true, clientX: x, clientY: y });
+    const hit = document.elementFromPoint(nb.left + 10, nb.top + 10);
+    hit.dispatchEvent(mk("pointerdown", nb.left + 10, nb.top + 10));
+    canvas.dispatchEvent(new PointerEvent("pointercancel", { bubbles: true, cancelable: false, pointerId: 9, pointerType: "touch", isPrimary: true }));
+    const settled = document.querySelector(".topology-node").getBoundingClientRect().left;
+    canvas.dispatchEvent(mk("pointermove", nb.left + 120, nb.top + 60));
+    canvas.dispatchEvent(mk("pointermove", nb.left + 180, nb.top + 90));
+    return { settled, afterHover: document.querySelector(".topology-node").getBoundingClientRect().left };
+  });
+  expect(Math.abs(cancelProbe.afterHover - cancelProbe.settled)).toBeLessThan(2);
+  expect(pageErrors).toEqual([]);
+});
+

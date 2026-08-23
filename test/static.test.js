@@ -131,3 +131,13 @@ test("iteration-7 keeps stored gateways and surfaces cross-tab conflicts", async
     assert.ok(occurrences === 0, `${dead} is no longer imported by app.js`);
   }
 });
+test("iteration-8 keeps touch canvas gestures reliable", async () => {
+  const css = await readFile(new URL("public/styles.css", root), "utf8");
+  const app = await readFile(new URL("public/app.js", root), "utf8");
+  assert.match(css, /\.canvas\{[^}]*touch-action:none/, "browser gestures must not hijack drags that start on the canvas");
+  assert.match(app, /let activePointers = new Map\(\);[\s\S]*?let pinch = null;/, "multi-touch pointers must be tracked for pinch zoom");
+  assert.match(app, /function capturePointer\(e\)\{try\{e\.currentTarget\.setPointerCapture\(e\.pointerId\)\}catch\{\}\}/, "setPointerCapture must be guarded against inactive pointers");
+  assert.ok(app.includes('addEventListener("pointercancel"'), "cancelled gestures must abort instead of leaving a stuck drag");
+  assert.match(app, /pinch=\{dist:Math\.hypot\(a\.x-b\.x,a\.y-b\.y\)\|\|1,zoom:canvasZoom\}/, "pinch baseline must come from the two active pointers");
+});
+
