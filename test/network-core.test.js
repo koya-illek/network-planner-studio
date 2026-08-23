@@ -212,15 +212,20 @@ test("CSV export cells neutralize formula injection and round-trip losslessly",(
   assert.equal(guardCsvCell("@import"),"'@import");
   assert.equal(guardCsvCell("\t=x"),"'\t=x");
   assert.equal(guardCsvCell("\rcmd"),"'\rcmd");
+  assert.equal(guardCsvCell("\ncmd"),"'\ncmd");
+  assert.equal(guardCsvCell("  =cmd"),"'  =cmd");
   assert.equal(guardCsvCell("10.20.10.0/24"),"10.20.10.0/24");
   assert.equal(guardCsvCell(42),"42");
   assert.equal(guardCsvCell(""),"");
   assert.equal(guardCsvCell(null),"");
-  for(const hostile of ["=cmd","+2","-flag","@x","\ty","\rz"]){
+  for(const hostile of ["=cmd","+2","-flag","@x","\ty","\rz","\nrun","  =sum"]){
     const cell=guardCsvCell(hostile);
     assert.notEqual(cell[0],hostile[0]);
     assert.equal(unguardCsvCell(cell),hostile);
   }
   assert.equal(unguardCsvCell("plain"),"plain");
   assert.equal(unguardCsvCell(""),"");
+  for(const apostrophe of ["'=literal","'+353","'-flag","'@name","'plain","''nested"]){
+    assert.equal(unguardCsvCell(guardCsvCell(apostrophe)),apostrophe);
+  }
 });
