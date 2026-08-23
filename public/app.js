@@ -125,7 +125,12 @@ function focusKeeper(){
 }
 function restoreFocus(keeper){
   if(!keeper||document.activeElement!==document.body)return;
-  $(keeper)?.focus({preventScroll:true});
+  const target=$(keeper);
+  target?.focus({preventScroll:true});
+  if(document.activeElement===document.body&&!target?.offsetParent){
+    const opener=target?.closest("#sites-panel")?$("#mobile-sites-button"):null;
+    if(opener&&opener.offsetParent)opener.focus({preventScroll:true});
+  }
 }
 function render(){
   const keeper=focusKeeper();

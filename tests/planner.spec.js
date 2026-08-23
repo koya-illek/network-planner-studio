@@ -179,4 +179,9 @@ test("keeps keyboard focus when selection and policy edits re-render", async ({ 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(150);
   expect(await page.evaluate(() => `${document.activeElement.className.split(" ")[0]}[${document.activeElement.dataset.site || ""}]`)).toBe(`topology-node[${nodeId}]`);
+
+  await page.locator("#mobile-sites-button").click();
+  await page.locator(".site-row-select").last().focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#mobile-sites-button")).toBeFocused();
 });
