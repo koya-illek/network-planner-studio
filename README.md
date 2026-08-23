@@ -56,6 +56,15 @@ npm run test:e2e
 
 The health endpoint is available at `/api/health`.
 
+Before a release, run the complete local gate:
+
+```sh
+npm run check:release
+```
+
+The gate checks package, lockfile, health, and schema provenance. It then runs
+the unit suite, browser suite, dependency audit, and Wrangler dry run.
+
 ## Deploy
 
 ```sh

@@ -1,3 +1,5 @@
+import packageMetadata from "./package.json" with { type: "json" };
+
 const SECURITY_HEADERS = {
   "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
   "Cross-Origin-Opener-Policy": "same-origin",
@@ -24,7 +26,7 @@ export default {
       headers.set("Cache-Control", "no-store");
       if (request.method === "OPTIONS") return new Response(null, { status: 204, headers });
       if (!["GET", "HEAD"].includes(request.method)) return Response.json({ ok: false, error: "method_not_allowed" }, { status: 405, headers });
-      const body = JSON.stringify({ ok: true, service: "network-planner-studio", version: "0.9.0", schema: "network-planner-studio/design", schemaVersion: 3 });
+      const body = JSON.stringify({ ok: true, service: packageMetadata.name, version: packageMetadata.version, schema: "network-planner-studio/design", schemaVersion: 3 });
       headers.set("Content-Type", "application/json; charset=utf-8");
       return new Response(request.method === "HEAD" ? null : body, { status: 200, headers });
     }

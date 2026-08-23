@@ -1,12 +1,14 @@
 {
   "name": "network-planner-studio",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "wrangler dev --local --host 127.0.0.1",
     "test": "node --test",
     "test:e2e": "playwright test",
+    "check:provenance": "node scripts/check-release.mjs",
+    "check:release": "npm run check:provenance && npm test && npm run test:e2e && npm audit --omit=dev && wrangler deploy --dry-run",
     "deploy": "wrangler deploy"
   },
   "devDependencies": {

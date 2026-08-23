@@ -51,10 +51,16 @@ test("worker exposes health and hardened assets", async () => {
   assert.doesNotMatch(html, /—/);
 });
 
-test("health release version matches package.json", async () => {
+test("health and lockfile release provenance match package.json", async () => {
   const pkg = JSON.parse(await readFile(new URL("package.json", root), "utf8"));
-  const worker = await readFile(new URL("worker.js", root), "utf8");
-  assert.ok(worker.includes(`version: "${pkg.version}"`), "worker health payload must report the package.json version");
+  const lock = JSON.parse(await readFile(new URL("package-lock.json", root), "utf8"));
+  const { default: worker } = await import("../worker.js");
+  const response = await worker.fetch(new Request("http://127.0.0.1/api/health"), {});
+  const health = await response.json();
+  assert.equal(lock.version, pkg.version, "lockfile metadata must report the package.json version");
+  assert.equal(lock.packages[""].version, pkg.version, "lockfile root package must report the package.json version");
+  assert.equal(health.service, pkg.name, "health must report the package name");
+  assert.equal(health.version, pkg.version, "health must report the package version");
 });
 
 test("round-2 affordances stay wired: motion, touch, live errors, keyboard links, inspector close", async () => {
