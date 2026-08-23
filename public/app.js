@@ -709,6 +709,13 @@ $("#canvas").addEventListener("wheel",e=>{if(!e.ctrlKey)return;e.preventDefault(
 let resizeFrame=null;window.addEventListener("resize",()=>{stopTrace();cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(()=>{const keeper=focusKeeper();renderCanvas();restoreFocus(keeper)})});
 // A debounced save must not die with the tab: flush it when the page goes away.
 window.addEventListener("pagehide",()=>{if(touch.timer){clearTimeout(touch.timer);touch.timer=null;saveState()}});
+// Storage has no merge: when two tabs hold one design, the next save from
+// either side silently destroys the other's work. Surface the conflict.
+window.addEventListener("storage",e=>{
+  if(e.key!==STORAGE_KEY||!e.newValue)return;
+  let incoming=null;try{incoming=JSON.parse(e.newValue)}catch{}
+  if(!incoming||incoming.projectId!==state.projectId||String(incoming.updatedAt)!==String(state.updatedAt))showToast("This design changed in another browser tab. Reload here or use Projects to pick the version to keep.");
+});
 
 function findVlan(id){for(const site of state.sites){const vlan=site.vlans.find(v=>v.id===id);if(vlan)return{site,vlan}}return null}
 function safeParse(cidr){try{return parseCidr(cidr)}catch{return null}}

@@ -191,6 +191,16 @@ test("flushes a pending debounced save when the page is hidden", async ({ page }
   expect(stored).toBe("Flush test");
 });
 
+test("warns when the current design changes in another browser tab", async ({ page }) => {
+  const other = await page.context().newPage();
+  await other.goto("/");
+  await other.locator("#project-name-button").click();
+  await other.locator("#name-form input[name=name]").fill("Renamed in the other tab");
+  await other.locator("#name-form button[type=submit]").click();
+  await expect(page.locator("#toast")).toContainText("another browser tab", { timeout: 3000 });
+  await other.close();
+});
+
 test("relayouts the canvas after edits made from other tabs", async ({ page }) => {
   const nodeBox = () => page.evaluate(() => {
     const canvas = document.querySelector("#canvas").getBoundingClientRect();
