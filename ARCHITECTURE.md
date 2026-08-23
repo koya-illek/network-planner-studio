@@ -1,6 +1,6 @@
 # Network Planner Studio architecture
 
-Last reviewed: 2026-08-15
+Last reviewed: 2026-08-22
 
 Network Planner Studio is a local-first IPv4 design workbench. Cloudflare serves the application, while network designs, calculations, history, and exports remain in the user's browser unless the user deliberately downloads or imports a file.
 
@@ -48,7 +48,7 @@ No project-data arrow returns to Cloudflare because normal designs are processed
 
 | Component | Responsibility | Primary source |
 | --- | --- | --- |
-| Cloudflare Worker | Serves static assets, canonical-host redirects, security headers, and a small health endpoint | `worker.js` |
+| Cloudflare Worker | Serves static assets with security and cross-origin isolation headers, canonical-host redirects, a branded 404 page, and a small health endpoint | `worker.js` |
 | Browser shell | Manages project workflows, forms, topology interaction, persistence, import, export, report rendering, and accessibility state | `public/app.js` |
 | Network core | Owns schema v3, normalization, validation, IPv4 and CIDR math, allocation, topology, routing, trace, migration, CSV, and report data | `public/network-core.js` |
 | Static UI | Defines the application structure and styling | `public/index.html`, `public/styles.css` |
@@ -94,7 +94,7 @@ Every entry path uses shared factories and validators. Manual forms, recommendat
 | --- | --- | --- | --- |
 | Cloudflare Workers | Serves the application, redirects aliases, exposes `/api/health`, and provides observability | No project payload is submitted by normal use | Yes for hosted use |
 | Cloudflare Workers Assets | Serves HTML, CSS, JavaScript, icons, robots, and sitemap | No project data | Yes for hosted use |
-| Browser `localStorage` | Stores projects on the user's device | Data stays in that browser profile | Optional persistence |
+| Browser `localStorage` | Stores projects on the user's device. The current design and a 20-project library (most recently updated, current project always kept) are written through debounced saves; undo history is capped at 40 in-memory snapshots | Data stays in that browser profile | Optional persistence |
 | Browser print and download APIs | Produces user-controlled files and PDF handoff | Data leaves only through user-directed export | Optional |
 
 There is no runtime database, analytics service, authentication provider, remote planner API, MCP server, cloud project sync, live network discovery, vendor controller, or RMM integration.
@@ -104,10 +104,12 @@ There is no runtime database, analytics service, authentication provider, remote
 - Designs are private and local by default.
 - Cloudflare receives normal web request metadata for application assets and health checks.
 - Site names, IP ranges, policies, assumptions, and implementation notes are not sent to an application backend during normal planning.
-- Imports are untrusted input and are schema-validated before use.
+- Imports are untrusted input and are schema-validated before use. JSON and CSV imports above 10 MB are rejected before parsing.
 - Dynamic values are escaped or enum-constrained before rendering.
 - Storage failure is reported to the user rather than silently discarding changes.
 - Exported files become the user's responsibility once downloaded or shared.
+- Exported CSV cells are neutralized against spreadsheet formula execution, and CSV import strips that guard so round trips stay lossless.
+- Animation respects `prefers-reduced-motion`: hero flow lines, pulse indicators and trace particles are disabled when reduced motion is requested.
 
 ## Interfaces
 
@@ -134,6 +136,11 @@ One Cloudflare Worker serves `network.illek.ie` and the compatibility hostname `
 - A missing network path produces an unavailable trace rather than an invented route.
 - Import migration preserves recoverable legacy data and reports bounded corrections.
 - The application continues to work without storage, although projects will not persist after the session.
+
+## Accessibility model
+
+- Landmarks, skip link, roving-tabindex tabs, keyboard-operable rows, nodes and WAN links, live form errors, and focus preservation across selection re-renders keep the planner operable without a pointer.
+- Touch targets meet 44 px on coarse pointers; reduced-motion preferences disable decorative animation.
 
 ## Non-goals
 
