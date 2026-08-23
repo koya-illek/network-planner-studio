@@ -85,6 +85,17 @@ test("stores explicit DHCP pools outside the gateway", async ({ page }) => {
   await expect(page.locator("#inspector")).toContainText("10.20.10.20 – 10.20.10.100");
 });
 
+test("keeps a stored gateway when a VLAN is edited", async ({ page }) => {
+  const design={schema:"network-planner-studio/design",version:3,name:"Gateway keeper",mode:"imported",topologyMode:"custom",policies:{spokeToSpoke:"via-hub",centralizedInspection:false},flowPolicies:{},assumptions:[],sites:[{id:"site",name:"HQ",type:"office",cidr:"10.60.0.0/16",devices:1,wan:"single",growth:30,x:20,y:20,topologyRole:"standalone",hubId:null,internetBreakout:"local",vlans:[{id:"vlan",name:"Staff",vid:10,role:"users",devices:40,cidr:"10.60.10.0/24",gateway:"10.60.10.254",dhcpEnabled:true,reserved:1,dhcpStart:"10.60.10.2",dhcpEnd:"10.60.10.250"}]}],links:[]};
+  await page.locator("#file-input").setInputFiles({ name:"gateway.json", mimeType:"application/json", buffer:Buffer.from(JSON.stringify(design)) });
+  await page.locator(".vlan-row").first().click();
+  await page.locator("[data-edit-vlan]").click();
+  await page.locator("#vlan-form input[name=name]").fill("Staff renamed");
+  await page.locator("#vlan-form button[type=submit]").click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("network-planner-studio.v1")).sites[0].vlans[0]), { timeout: 2000 }).toMatchObject({ name:"Staff renamed", gateway:"10.60.10.254" });
+  await expect(page.locator("#inspector")).toContainText("10.60.10.254");
+});
+
 test("rejects invalid gateways and hostile imported policy values", async ({ page }) => {
   const design={schema:"network-planner-studio/design",version:3,name:"Hostile",mode:"imported",topologyMode:"custom",policies:{spokeToSpoke:"via-hub",centralizedInspection:false},flowPolicies:{},assumptions:[],sites:[{id:"site",name:"HQ",type:"office",cidr:"10.60.0.0/16",devices:1,wan:"single",growth:30,x:20,y:20,topologyRole:"standalone",hubId:null,internetBreakout:"local",vlans:[{id:"vlan",name:"Staff",vid:10,role:'users" data-breakout="bad',devices:1,cidr:"10.60.10.0/24",gateway:"192.0.2.1",dhcpEnabled:true,reserved:1,dhcpStart:"10.60.10.2",dhcpEnd:"10.60.10.254"}]}],links:[]};
   await page.locator("#file-input").setInputFiles({name:"hostile.json",mimeType:"application/json",buffer:Buffer.from(JSON.stringify(design))});

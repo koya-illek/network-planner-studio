@@ -551,7 +551,11 @@ $("#vlan-form").addEventListener("submit",e=>{
     if(!cidr)cidr=nextSubnet(site.cidr,prefixForDevices(devices,site.growth,reserved,{transit:role==="transit"}),site.vlans.filter(v=>v.id!==editingVlanId).map(v=>v.cidr));
     cidr=parseCidr(cidr,{allow31:role==="transit"}).cidr;if(!contains(site.cidr,cidr))throw new Error(`${cidr} is outside the site's ${site.cidr} allocation`);
     if(site.vlans.some(v=>v.id!==editingVlanId&&rangesOverlap(cidr,v.cidr)))throw new Error("This subnet overlaps another VLAN at the site");
-    const dhcpEnabled=fd.get("dhcpEnabled")==="true",automaticPool=defaultDhcpPool(cidr,reserved),dhcpStart=fd.get("dhcpStart").trim()||automaticPool.start,dhcpEnd=fd.get("dhcpEnd").trim()||automaticPool.end,gateway=firstUsable(cidr);
+    const dhcpEnabled=fd.get("dhcpEnabled")==="true",automaticPool=defaultDhcpPool(cidr,reserved),dhcpStart=fd.get("dhcpStart").trim()||automaticPool.start,dhcpEnd=fd.get("dhcpEnd").trim()||automaticPool.end;
+    // The form has no gateway field, so an edit must keep the stored gateway
+    // whenever it is still a valid host for the resulting subnet and role.
+    const previousGateway=editingVlanId?findVlan(editingVlanId)?.vlan.gateway:null;
+    const gateway=previousGateway&&validateGateway(previousGateway,cidr,{transit:role==="transit"})?previousGateway:firstUsable(cidr);
     if(!validateGateway(gateway,cidr,{transit:role==="transit"}))throw new Error("Gateway must be a usable host inside the VLAN subnet");
     const poolValidation=validateDhcpPool(cidr,gateway,reserved,{enabled:dhcpEnabled,start:dhcpStart,end:dhcpEnd});
     if(!poolValidation.valid)throw new Error(poolValidation.errors[0]);
