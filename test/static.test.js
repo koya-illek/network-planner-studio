@@ -122,9 +122,19 @@ test("iteration-5 marks the health endpoint uncacheable without touching asset c
   assert.ok(worker.includes('headers.set("Cache-Control", "no-store")'), "health responses must be no-store");
 });
 
-test("iteration-6 flushes pending saves on pagehide", async () => {
+test("iteration-6 flushes pending saves on pagehide and on backgrounding", async () => {
   const app = await readFile(new URL("public/app.js", root), "utf8");
-  assert.match(app, /window\.addEventListener\("pagehide",\(\)=>\{if\(touch\.timer\)\{clearTimeout\(touch\.timer\);touch\.timer=null;saveState\(\)\}\}\)/, "the debounce window must not swallow the last edit on tab close");
+  assert.match(app, /function flushPendingSave\(\)\{if\(touch\.timer\)\{clearTimeout\(touch\.timer\);touch\.timer=null;saveState\(\)\}\}/, "the debounce window must not swallow the last edit");
+  assert.match(app, /window\.addEventListener\("pagehide",flushPendingSave\)/, "pagehide must flush the debounce");
+  assert.match(app, /document\.addEventListener\("visibilitychange",\(\)=>\{if\(document\.visibilityState==="hidden"\)flushPendingSave\(\)\}\)/, "backgrounding the tab must flush the debounce before mobile discards it");
+});
+
+test("quarantines unreadable stored state instead of overwriting it", async () => {
+  const app = await readFile(new URL("public/app.js", root), "utf8");
+  assert.match(app, /function quarantineStorage\(key\)\{[\s\S]*?localStorage\.getItem\(key\);if\(raw!=null\)localStorage\.setItem\(`\$\{key\}\.unreadable`,raw\)[\s\S]*?catch\{\}\}/, "the raw corrupt blob must be preserved before any rewrite");
+  const quarantines = (app.match(/quarantineStorage\(/g) ?? []).length;
+  assert.ok(quarantines >= 3, "both loadState and loadLibrary must quarantine (definition plus two call sites)");
+  assert.match(app, /could not be read\. The raw copy was kept under/, "the recovery message must tell the user where the copy lives");
 });
 
 test("iteration-7 keeps stored gateways and surfaces cross-tab conflicts", async () => {

@@ -70,8 +70,13 @@ function vlan(name,vid,role,devices,cidr){const pool=defaultDhcpPool(cidr,1);ret
 function suggestSiteRange(devices=50){
   return suggestSiteRangeCore(state.sites.map(s=>s.cidr).filter(Boolean),devices);
 }
-function loadState(){try{const value=JSON.parse(storageGet(STORAGE_KEY));return value?migrateDesign(value,{strict:false}):null}catch(error){storageIssue="The saved design could not be read. Start a new design or import a recovery copy.";return null}}
-function loadLibrary(){try{const value=JSON.parse(storageGet(LIBRARY_KEY));return value&&typeof value==="object"?value:{}}catch{storageIssue="The local project library could not be read. Export current work before continuing.";return{}}}
+// An unreadable stored blob is quarantined before any later save can overwrite
+// it, so one corrupt byte can no longer erase the whole local library.
+function quarantineStorage(key){
+  try{const raw=localStorage.getItem(key);if(raw!=null)localStorage.setItem(`${key}.unreadable`,raw)}catch{}
+}
+function loadState(){try{const value=JSON.parse(storageGet(STORAGE_KEY));return value?migrateDesign(value,{strict:false}):null}catch(error){quarantineStorage(STORAGE_KEY);storageIssue="The saved design could not be read. The raw copy was kept under network-planner-studio.v1.unreadable. Start a new design or import a recovery copy.";showToast(storageIssue);return null}}
+function loadLibrary(){try{const value=JSON.parse(storageGet(LIBRARY_KEY));return value&&typeof value==="object"?value:{}}catch{quarantineStorage(LIBRARY_KEY);storageIssue="The local project library could not be read. The raw copy was kept under network-planner-studio.projects.v1.unreadable. Export current work before continuing.";showToast(storageIssue);return{}}}
 function saveState(){
   state.updatedAt=new Date().toISOString();
   const saved=storageSet(STORAGE_KEY,JSON.stringify(state));
@@ -761,8 +766,11 @@ $("#canvas").addEventListener("pointerup",e=>releasePointer(e,true));
 $("#canvas").addEventListener("pointercancel",e=>releasePointer(e,false));
 $("#canvas").addEventListener("wheel",e=>{if(!e.ctrlKey)return;e.preventDefault();canvasZoom=Math.max(.7,Math.min(1.5,canvasZoom+(e.deltaY<0?.1:-.1)));applyCanvasZoom()},{passive:false});
 let resizeFrame=null;window.addEventListener("resize",()=>{stopTrace();cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(()=>{const keeper=focusKeeper();renderCanvas();restoreFocus(keeper)})});
-// A debounced save must not die with the tab: flush it when the page goes away.
-window.addEventListener("pagehide",()=>{if(touch.timer){clearTimeout(touch.timer);touch.timer=null;saveState()}});
+// A debounced save must not die with the tab: flush it when the page goes
+// away, and when it is only backgrounded (mobile may never fire pagehide).
+function flushPendingSave(){if(touch.timer){clearTimeout(touch.timer);touch.timer=null;saveState()}}
+window.addEventListener("pagehide",flushPendingSave);
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="hidden")flushPendingSave()});
 // Storage has no merge: when two tabs hold one design, the next save from
 // either side silently destroys the other's work. Surface the conflict.
 window.addEventListener("storage",e=>{

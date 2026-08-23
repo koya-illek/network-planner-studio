@@ -534,3 +534,23 @@ test("keeps focus recoverable when a background save-render lands during a dialo
   expect(state.active).toBe("add-vlan-mini");
   expect(state.replacements).toBeGreaterThan(0);
 });
+
+test("quarantines an unreadable project library instead of erasing it", async ({ page }) => {
+  await page.evaluate(() => localStorage.setItem("network-planner-studio.projects.v1", "{not json"));
+  await page.locator("#utility-menu > summary").click();
+  await page.locator("#projects-button").click();
+  const quarantined = await page.evaluate(() => localStorage.getItem("network-planner-studio.projects.v1.unreadable"));
+  expect(quarantined).toBe("{not json");
+  await expect(page.locator("#project-list")).toContainText("No saved designs yet.");
+  await expect(page.locator("#toast")).toContainText("could not be read");
+  await page.keyboard.press("Escape");
+});
+
+test("flushes a pending debounced save when the tab is backgrounded", async ({ page }) => {
+  await page.locator("#project-name-button").click();
+  await page.locator("#name-form input[name=name]").fill("Background flush test");
+  await page.locator("#name-form button[type=submit]").click();
+  await page.evaluate(() => Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" }));
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("network-planner-studio.v1")).name)).toBe("Background flush test");
+});
