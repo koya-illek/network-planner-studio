@@ -1,6 +1,6 @@
 # Network Planner Studio architecture
 
-Last reviewed: 2026-08-22
+Last reviewed: 2026-08-23
 
 Network Planner Studio is a local-first IPv4 design workbench. Cloudflare serves the application, while network designs, calculations, history, and exports remain in the user's browser unless the user deliberately downloads or imports a file.
 
@@ -144,7 +144,7 @@ One Cloudflare Worker serves `network.illek.ie` and the compatibility hostname `
 - Landmarks, skip link, roving-tabindex tabs, keyboard-operable rows, nodes and WAN links, live form errors, and focus preservation across selection re-renders keep the planner operable without a pointer. Focus keeping also covers dialog-driven edits from inspector actions and the per-site VLAN shortcut, falling back to the inspector container when the originating control no longer exists. The topology canvas is a named region so its label reaches screen readers.
 - The mobile Sites drawer keeps `aria-expanded` truthful across every close path, including selecting a site or VLAN from the drawer itself.
 - Touch targets meet 44 px on coarse pointers; reduced-motion preferences disable decorative animation.
-- On touch screens the canvas claims its gestures with `touch-action: none`, two-finger pinch zooms within the same clamped range as the zoom controls, and a cancelled or interrupted gesture aborts cleanly instead of leaving a stuck drag.
+- On touch screens the canvas claims its gestures with `touch-action: none`, two-finger pinch zooms within the same clamped range as the zoom controls, and a cancelled or interrupted gesture aborts cleanly instead of leaving a stuck drag. A cancelled node drag also returns the site to its pre-drag position, and an arrow-key nudge burst records one undo entry like a pointer drag.
 
 ## Non-goals
 

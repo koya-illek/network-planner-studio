@@ -36,7 +36,7 @@ data flow, privacy boundary, deployment topology, and external dependencies.
 - Multiple local projects with duplicate, open and delete workflows
 - Print-ready implementation report for PDF handoff
 - Versioned JSON migration plus CSV address-plan import/export
-- Zoom, pan, pinch, fit-to-screen, keyboard-selectable nodes and a mobile site drawer
+- Zoom, pan, pinch, fit-to-screen, undoable keyboard nudges, drag-cancel snap-back and a mobile site drawer
 - Responsive desktop and mobile layouts
 
 ## Run locally
