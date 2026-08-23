@@ -187,6 +187,16 @@ test("strict v3 migration rejects string booleans instead of changing design int
   assert.equal(recovered.links[0].defaultRoute,false);
 });
 
+test("strict v3 migration rejects invalid numeric types and lenient recovery reports corrections",()=>{
+  const input={schema:SCHEMA_ID,version:SCHEMA_VERSION,name:"Number probe",mode:"imported",topologyMode:"custom",policies:{spokeToSpoke:"via-hub",centralizedInspection:false},flowPolicies:{},assumptions:[],sites:[{id:"site",name:"HQ",type:"office",cidr:"10.50.0.0/16",devices:1,wan:"single",growth:30,x:20,y:20,topologyRole:"standalone",hubId:null,internetBreakout:"local",vlans:[{id:"vlan",name:"Staff",vid:5000,role:"users",devices:"30",cidr:"10.50.10.0/24",gateway:"10.50.10.1",dhcpEnabled:true,reserved:1,dhcpStart:"10.50.10.2",dhcpEnd:"10.50.10.254"}]}],links:[]};
+  assert.throws(()=>migrateDesign(input),/must be/);
+  const recovered=migrateDesign(input,{strict:false});
+  assert.equal(recovered.sites[0].vlans[0].vid,4094);
+  assert.equal(recovered.sites[0].vlans[0].devices,30);
+  assert.ok(recovered.importWarnings.some(message=>message.includes("vid")));
+  assert.ok(recovered.importWarnings.some(message=>message.includes("devices")));
+});
+
 test("allocation and migration remain finite across generated boundary values",()=>{
   for(let prefix=8;prefix<=31;prefix++){
     const parsed=parseCidr(`10.0.0.0/${prefix}`);

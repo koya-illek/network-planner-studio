@@ -20,11 +20,6 @@ function storageSet(key, value) {
   try { localStorage.setItem(key, value); return true; }
   catch { storageIssue = "Browser storage is full or unavailable. Export a recovery copy before continuing."; return false; }
 }
-function storageRemove(key) {
-  try { localStorage.removeItem(key); }
-  catch { storageIssue = "Browser storage is unavailable."; }
-}
-
 let state = loadState() || blankState();
 let selected = null;
 let currentTool = "select";
@@ -278,6 +273,7 @@ function reviewDesign(){
   if(reviewCache)return reviewCache;
   const issues=[];
   if(!state.sites.length)return[{severity:"info",title:"Start the address hierarchy",message:"Add a site with a parent IPv4 range and create VLANs inside it."}];
+  for(const message of state.importWarnings||[])issues.push(issue("warning","Recovered design data",message));
   for(let i=0;i<state.sites.length;i++){
     const s=state.sites[i],sp=safeParse(s.cidr);
     if(!sp)issues.push(issue("error","Invalid site range",`${s.name} does not have a valid IPv4 CIDR range.`,s.id));

@@ -319,10 +319,19 @@ function safeIdentifier(value) {
   return /^[A-Za-z0-9_-]{1,80}$/.test(id) ? id : randomId();
 }
 
-function finiteBounded(value, fallback, [min, max], integer = false) {
-  if (value === null || value === undefined || (typeof value === "string" && !value.trim()) || !["number", "string"].includes(typeof value)) return fallback;
+function finiteBounded(value, fallback, [min, max], integer = false, { errors = [], path = "value", validateTypes = false } = {}) {
+  if (value === null || value === undefined) return fallback;
+  if ((typeof value === "string" && !value.trim()) || !["number", "string"].includes(typeof value)) {
+    if (validateTypes) errors.push(issue(path, `${path} must be a number`, "invalid-type"));
+    return fallback;
+  }
   const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return fallback;
+  if (validateTypes && typeof value !== "number") errors.push(issue(path, `${path} must be a number`, "invalid-type"));
+  if (!Number.isFinite(numeric)) {
+    if (validateTypes) errors.push(issue(path, `${path} must be finite`, "invalid-number"));
+    return fallback;
+  }
+  if (validateTypes && (numeric < min || numeric > max || integer && !Number.isInteger(numeric))) errors.push(issue(path, `${path} must be ${integer ? "an integer " : ""}from ${min} to ${max}`, "invalid-number"));
   const bounded = Math.min(max, Math.max(min, numeric));
   return integer ? Math.trunc(bounded) : bounded;
 }
@@ -362,16 +371,17 @@ function normalizeVlan(raw = {}, errors = [], path = "vlan", { allowIncomplete =
   const cidr = canonicalAllocation(value.cidr);
   if (!cidr && !allowIncomplete) errors.push(issue(`${path}.cidr`, "VLAN subnet is required", "invalid-cidr"));
   else if (cidr && (() => { try { parseCidr(cidr); return false; } catch { return true; } })()) errors.push(issue(`${path}.cidr`, "VLAN subnet must be an aligned allocation CIDR from /8 through /31", "invalid-cidr"));
-  const reserved = finiteBounded(value.reserved, 1, LIMITS.reserved, true);
+  const numberOptions = key => ({ errors, path: `${path}.${key}`, validateTypes });
+  const reserved = finiteBounded(value.reserved, 1, LIMITS.reserved, true, numberOptions("reserved"));
   const gateway = normalizedText(value.gateway, firstUsable(cidr), 64);
   let pool = { start: "", end: "" };
   try { pool = defaultDhcpPool(cidr, reserved, { gateway }); } catch { /* validation below reports the CIDR */ }
   return {
     id: safeIdentifier(value.id),
     name: normalizedText(value.name, "Network", 100),
-    vid: finiteBounded(value.vid, 1, LIMITS.vlanId, true),
+    vid: finiteBounded(value.vid, 1, LIMITS.vlanId, true, numberOptions("vid")),
     role: has(role, ENUMS.vlanRoles) ? role : "other",
-    devices: finiteBounded(value.devices, 1, LIMITS.vlanDevices, true),
+    devices: finiteBounded(value.devices, 1, LIMITS.vlanDevices, true, numberOptions("devices")),
     cidr,
     gateway,
     dhcpEnabled: normalizedBoolean(value.dhcpEnabled, true, errors, `${path}.dhcpEnabled`, { validateTypes }),
@@ -392,16 +402,17 @@ function normalizeSite(raw = {}, errors = [], path = "site", options = {}) {
   const cidr = canonicalAllocation(value.cidr);
   if (!cidr && !options.allowIncomplete) errors.push(issue(`${path}.cidr`, "Site range is required", "invalid-cidr"));
   else if (cidr && (() => { try { parseCidr(cidr, { allow31: false }); return false; } catch { return true; } })()) errors.push(issue(`${path}.cidr`, "Site range must be an aligned allocation CIDR from /8 through /30", "invalid-cidr"));
+  const numberOptions = key => ({ errors, path: `${path}.${key}`, validateTypes: options.validateTypes });
   return {
     id: safeIdentifier(value.id),
     name: normalizedText(value.name, "Site", 100),
     type: has(type, ENUMS.siteTypes) ? type : "office",
     cidr,
-    devices: finiteBounded(value.devices, 1, LIMITS.siteDevices, true),
+    devices: finiteBounded(value.devices, 1, LIMITS.siteDevices, true, numberOptions("devices")),
     wan: has(wan, ENUMS.wanTypes) ? wan : "single",
-    growth: finiteBounded(value.growth, 30, LIMITS.growth),
-    x: finiteBounded(value.x, 20, LIMITS.coordinate),
-    y: finiteBounded(value.y, 20, LIMITS.coordinate),
+    growth: finiteBounded(value.growth, 30, LIMITS.growth, false, numberOptions("growth")),
+    x: finiteBounded(value.x, 20, LIMITS.coordinate, false, numberOptions("x")),
+    y: finiteBounded(value.y, 20, LIMITS.coordinate, false, numberOptions("y")),
     topologyRole: has(role, ENUMS.topologyRoles) ? role : "standalone",
     hubId: value.hubId ? String(value.hubId).slice(0, 80) : null,
     internetBreakout: has(breakout, ENUMS.breakoutModes) ? breakout : "local",
@@ -528,7 +539,7 @@ export function assertValidDesign(design, options = {}) {
 
 export function createVlan(values = {}, options = {}) {
   const errors = [];
-  const vlan = normalizeVlan(values, errors, "vlan", { allowIncomplete: false });
+  const vlan = normalizeVlan(values, errors, "vlan", { allowIncomplete: false, validateTypes: true });
   const design = { schema: SCHEMA_ID, version: SCHEMA_VERSION, mode: null, sites: [{ id: "site", name: "Site", type: "office", cidr: values.siteCidr || "10.0.0.0/8", devices: 1, wan: "single", growth: 30, x: 0, y: 0, topologyRole: "standalone", internetBreakout: "local", vlans: [vlan] }], links: [], topologyMode: "custom", policies: { spokeToSpoke: "via-hub" }, flowPolicies: {} };
   const result = validateNormalizedDesign(design);
   if (errors.length || !result.valid) throw new DesignValidationError((errors[0] || result.errors[0])?.message || "VLAN is invalid", [...errors, ...result.errors]);
@@ -537,7 +548,7 @@ export function createVlan(values = {}, options = {}) {
 
 export function createSite(values = {}, options = {}) {
   const errors = [];
-  const site = normalizeSite(values, errors, "site", { allowIncomplete: false });
+  const site = normalizeSite(values, errors, "site", { allowIncomplete: false, validateTypes: true });
   const design = { schema: SCHEMA_ID, version: SCHEMA_VERSION, mode: null, sites: [site], links: [], topologyMode: "custom", policies: { spokeToSpoke: "via-hub" }, flowPolicies: {} };
   const result = validateNormalizedDesign(design);
   if (errors.length || !result.valid) throw new DesignValidationError((errors[0] || result.errors[0])?.message || "Site is invalid", [...errors, ...result.errors]);
@@ -546,7 +557,7 @@ export function createSite(values = {}, options = {}) {
 
 export function createLink(values = {}) {
   const errors = [];
-  const link = normalizeLink(values, errors, "link");
+  const link = normalizeLink(values, errors, "link", { validateTypes: true });
   if (errors.length) throw new DesignValidationError(errors[0].message, errors);
   return link;
 }
@@ -610,7 +621,7 @@ export function migrateDesign(input, { strict = true } = {}) {
   const validation = validateNormalizedDesign(design, { allowIncomplete: legacyIncomplete });
   errors.push(...validation.errors);
   if (strict && errors.length) throw new DesignValidationError(errors[0].message, errors);
-  design.importWarnings = [...errors, ...validation.warnings].map(item => item.message).slice(0, 100);
+  design.importWarnings = [...new Set(errors.map(item => item.message))].slice(0, 100);
   return design;
 }
 

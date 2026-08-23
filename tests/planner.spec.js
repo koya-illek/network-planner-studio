@@ -148,6 +148,18 @@ test("rejects invalid gateways and hostile imported policy values", async ({ pag
   expect(await page.locator("[data-breakout]").count()).toBe(0);
 });
 
+test("reports corrections made while recovering stored design data", async ({ page }) => {
+  await page.evaluate(() => {
+    const design=JSON.parse(localStorage.getItem("network-planner-studio.v1"));
+    design.sites[0].vlans[0].vid=5000;
+    localStorage.setItem("network-planner-studio.v1",JSON.stringify(design));
+  });
+  await page.reload();
+  await page.locator('[data-view="review"]').click();
+  await expect(page.locator("#review-list")).toContainText("Recovered design data");
+  await expect(page.locator("#review-list")).toContainText("vid");
+});
+
 test("keeps CSV DHCP pool boundaries on export and import", async ({ page }) => {
   await page.locator(".vlan-row").first().click();
   await page.locator("[data-edit-vlan]").click();

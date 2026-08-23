@@ -138,7 +138,7 @@ One Cloudflare Worker serves `network.illek.ie` and the compatibility hostname `
 - Browser-storage failure leaves the current in-memory design available and shows recovery guidance.
 - If the same design is open in two browser tabs, a save from one tab warns the other instead of merging; storage holds whichever tab wrote last, so the warned tab should reload or pick a version through Projects.
 - A missing network path produces an unavailable trace rather than an invented route.
-- Import migration preserves recoverable legacy data and reports bounded corrections.
+- Strict v3 import rejects invalid numeric and boolean types. Lenient recovery bounds legacy or damaged values and lists every correction in Design review.
 - The application continues to work without storage, although projects will not persist after the session.
 
 ## Accessibility model
