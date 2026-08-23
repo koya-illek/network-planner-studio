@@ -139,6 +139,8 @@ textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(77,163,255,.2)
   .icon-button{width:44px;height:44px}
   .add-vlan-mini{min-width:44px;min-height:44px}
   .dialog-close{width:44px;height:44px;font-size:22px;display:inline-flex;align-items:center;justify-content:center}
+  .mode-group button,.zoom-controls button{min-height:44px}
+  .zoom-controls button{min-width:44px}
 }
 
 @media(max-width:720px){

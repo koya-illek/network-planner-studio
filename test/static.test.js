@@ -149,6 +149,20 @@ test("canvas health, link resilience and escape selection are wired", async () =
   assert.match(app, /roles\.filter\(destination=>destination!==source\)/, "the report must not present same-zone rows as policies");
 });
 
+test("imports tolerate BOMs and data tables carry scoped headers", async () => {
+  const app = await readFile(new URL("public/app.js", root), "utf8");
+  const html = await readFile(new URL("public/index.html", root), "utf8");
+  const css = await readFile(new URL("public/styles.css", root), "utf8");
+  assert.match(app, /JSON\.parse\(text\.replace\(\/\^\\uFEFF\/,""\)\)/, "JSON imports must strip a UTF-8 BOM like the CSV path does");
+  const colScopes = (html.match(/th scope="col"/g) ?? []).length + (app.match(/th scope="col"/g) ?? []).length;
+  assert.ok(colScopes >= 14, "every data table header must declare its scope");
+  assert.match(app, /<tr><th scope="row">/, "policy matrix row headers must be scoped");
+  assert.match(css, /\.mode-group button,\.zoom-controls button\{min-height:44px\}/, "coarse pointers need full-size toolbar targets");
+  assert.match(html, /rel="modulepreload" href="\/network-core\.js"/, "the core module must load in parallel with the app");
+  assert.match(html, /name="twitter:image:alt"/);
+  assert.match(html, /"isAccessibleForFree":true/);
+});
+
 test("iteration-7 keeps stored gateways and surfaces cross-tab conflicts", async () => {
   const app = await readFile(new URL("public/app.js", root), "utf8");
   const html = await readFile(new URL("public/index.html", root), "utf8");

@@ -16,12 +16,14 @@
   <meta property="og:image:alt" content="Network Planner Studio topology graphic">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:image" content="https://network.illek.ie/social-card.png">
+  <meta name="twitter:image:alt" content="Network Planner Studio topology graphic">
   <link rel="canonical" href="https://network.illek.ie/">
   <title>Network Planner Studio: IPv4 network design, made visible</title>
   <link rel="icon" href="/favicon.svg">
   <link rel="stylesheet" href="/styles.css">
+  <link rel="modulepreload" href="/network-core.js">
   <script src="/app.js" type="module"></script>
-  <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication","name":"Network Planner Studio","url":"https://network.illek.ie/","description":"Plan IPv4 networks, VLANs, sites, addressing, policy and VPN connectivity with guided recommendations.","applicationCategory":"DesignApplication","operatingSystem":"Any","browserRequirements":"Requires a modern web browser"}</script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication","name":"Network Planner Studio","url":"https://network.illek.ie/","description":"Plan IPv4 networks, VLANs, sites, addressing, policy and VPN connectivity with guided recommendations.","applicationCategory":"DesignApplication","operatingSystem":"Any","browserRequirements":"Requires a modern web browser","isAccessibleForFree":true,"featureList":["Site and VLAN modelling","Automatic subnet allocation with growth allowance","Overlap, containment and capacity validation","Hub-and-spoke policy design","Multi-hop route tracing","JSON and CSV exchange","Print-ready implementation report"]}</script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to network planner</a>
@@ -148,7 +150,7 @@
           <div id="address-summary" class="summary-grid"></div>
           <div class="table-card">
             <table>
-              <thead><tr><th>Site / network</th><th>VLAN</th><th>IPv4 prefix</th><th>Gateway</th><th>Needed</th><th>Usable</th><th>Headroom</th><th>Status</th></tr></thead>
+              <thead><tr><th scope="col">Site / network</th><th scope="col">VLAN</th><th scope="col">IPv4 prefix</th><th scope="col">Gateway</th><th scope="col">Needed</th><th scope="col">Usable</th><th scope="col">Headroom</th><th scope="col">Status</th></tr></thead>
               <tbody id="address-table"></tbody>
             </table>
           </div>
