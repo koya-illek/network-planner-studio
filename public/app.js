@@ -39,6 +39,7 @@ let redoStack = [];
 let canvasZoom = 1;
 let canvasPan = {x:0,y:0};
 let panDrag = null;
+let canvasDirty = false;
 
 function blankState() {
   return {schema:SCHEMA_ID,version:SCHEMA_VERSION,projectId:uid(),name:"Untitled network",mode:null,topologyMode:"custom",policies:{spokeToSpoke:"via-hub",centralizedInspection:false,secondaryHubId:null},flowPolicies:{},assumptions:[],sites:[],links:[],updatedAt:new Date().toISOString()};
@@ -151,6 +152,7 @@ function render(){
 function activateView(view, moveFocus=false){
   $$('[data-view]').forEach(button=>{const active=button.dataset.view===view;button.classList.toggle("active",active);button.setAttribute("aria-selected",String(active));button.tabIndex=active?0:-1});
   $$(".view").forEach(panel=>{const active=panel.id===`${view}-view`;panel.classList.toggle("active",active);panel.hidden=!active});
+  if(view==="topology"&&canvasDirty){const keeper=focusKeeper();renderCanvas();restoreFocus(keeper)}
   if(moveFocus)document.querySelector(`[data-view="${view}"]`)?.focus();
 }
 
@@ -170,6 +172,11 @@ function renderSiteList(){
 }
 
 function renderCanvas(){
+  // The canvas measures its own box; rendering while the topology view is
+  // hidden would bake 800x600 fallback geometry into nodes and the SVG
+  // viewBox. Defer instead and flush on view activation.
+  if($("#topology-view").hidden||$("#workspace").classList.contains("hidden")){canvasDirty=true;return}
+  canvasDirty=false;
   const layer=$("#node-layer"),svg=$("#link-layer"),canvas=$("#canvas");
   layer.innerHTML="";svg.innerHTML="";
   const w=canvas.clientWidth||800,h=canvas.clientHeight||600;

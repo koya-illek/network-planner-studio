@@ -155,8 +155,24 @@ test("skips trace particles under prefers-reduced-motion", async ({ page }) => {
   expect(await page.locator(".route-particle").count()).toBe(0);
 });
 
-test("keeps topology nodes inside the canvas on tablet widths", async ({ page }) => {
-  await page.setViewportSize({ width: 768, height: 900 });
+test("relayouts the canvas after edits made from other tabs", async ({ page }) => {
+  const nodeBox = () => page.evaluate(() => {
+    const canvas = document.querySelector("#canvas").getBoundingClientRect();
+    const node = document.querySelector(".topology-node").getBoundingClientRect();
+    return { viewBox: document.querySelector("#link-layer").getAttribute("viewBox"), left: node.left - canvas.left, top: node.top - canvas.top };
+  });
+  const before = await nodeBox();
+  await page.locator('[data-view="policy"]').click();
+  await page.locator("[data-flow]").first().click();
+  await page.waitForTimeout(400);
+  await page.locator('[data-view="topology"]').click();
+  const after = await nodeBox();
+  expect(after.viewBox).not.toBe("0 0 800 600");
+  expect(Math.abs(after.left - before.left)).toBeLessThanOrEqual(2);
+  expect(Math.abs(after.top - before.top)).toBeLessThanOrEqual(2);
+});
+
+test("keeps topology nodes inside the canvas on tablet widths", async ({ page }) => {  await page.setViewportSize({ width: 768, height: 900 });
   await page.waitForTimeout(250);
   const boxes = await page.evaluate(() => {
     const canvas = document.querySelector("#canvas").getBoundingClientRect();
