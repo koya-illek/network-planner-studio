@@ -131,6 +131,7 @@ test("iteration-7 keeps stored gateways and surfaces cross-tab conflicts", async
     assert.ok(occurrences === 0, `${dead} is no longer imported by app.js`);
   }
 });
+
 test("iteration-8 keeps touch canvas gestures reliable", async () => {
   const css = await readFile(new URL("public/styles.css", root), "utf8");
   const app = await readFile(new URL("public/app.js", root), "utf8");
@@ -141,3 +142,8 @@ test("iteration-8 keeps touch canvas gestures reliable", async () => {
   assert.match(app, /pinch=\{dist:Math\.hypot\(a\.x-b\.x,a\.y-b\.y\)\|\|1,zoom:canvasZoom\}/, "pinch baseline must come from the two active pointers");
 });
 
+test("iteration-8 defers workspace renders behind open modals", async () => {
+  const app = await readFile(new URL("public/app.js", root), "utf8");
+  assert.match(app, /if\(\$\("dialog\[open\]"\)\)\{touch\.deferred=true;return\}/, "a debounced render must not replace DOM behind an open dialog");
+  assert.match(app, /addEventListener\("close",e=>\{[^}]+\},true\)/, "the deferred render must flush when a dialog closes");
+});

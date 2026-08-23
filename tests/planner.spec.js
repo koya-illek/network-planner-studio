@@ -279,6 +279,7 @@ test("keeps keyboard focus when selection and policy edits re-render", async ({ 
   await page.keyboard.press("Enter");
   await expect(page.locator("#mobile-sites-button")).toBeFocused();
 });
+
 test("pinch-zooms the canvas on touch and aborts cancelled gestures", async ({ page }) => {
   const pageErrors = [];
   page.on("pageerror", error => pageErrors.push(String(error)));
@@ -334,3 +335,22 @@ test("pinch-zooms the canvas on touch and aborts cancelled gestures", async ({ p
   expect(pageErrors).toEqual([]);
 });
 
+test("keeps focus recoverable when a background save-render lands during a dialog", async ({ page }) => {
+  await page.locator(".add-vlan-mini").first().focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#vlan-dialog")).toBeVisible();
+  await page.evaluate(() => {
+    window.__inspectorReplacements = 0;
+    new MutationObserver(records => { window.__inspectorReplacements += records.length; }).observe(document.querySelector("#inspector"), { childList: true });
+    document.querySelector("[data-flow]").click();
+  });
+  await page.waitForTimeout(350);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(80);
+  const state = await page.evaluate(() => ({
+    active: document.activeElement?.className?.split(" ")[0] || document.activeElement?.tagName,
+    replacements: window.__inspectorReplacements
+  }));
+  expect(state.active).toBe("add-vlan-mini");
+  expect(state.replacements).toBeGreaterThan(0);
+});

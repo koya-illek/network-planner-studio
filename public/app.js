@@ -95,7 +95,20 @@ function restoreHistory(source,target){
 function updateHistoryButtons(){
   $("#undo-button").disabled=!undoStack.length;$("#redo-button").disabled=!redoStack.length;
 }
-function touch(){ $("#save-state").textContent="Saving…"; clearTimeout(touch.timer); touch.timer=setTimeout(()=>{saveState();render()},220)}
+function touch(){
+  $("#save-state").textContent="Saving…";
+  clearTimeout(touch.timer);
+  touch.timer=setTimeout(()=>{
+    touch.timer=null;saveState();
+    if($("dialog[open]")){touch.deferred=true;return}
+    touch.deferred=false;render();
+  },220);
+}
+document.addEventListener("close",e=>{
+  if(!(e.target instanceof HTMLDialogElement)||!touch.deferred||$("dialog[open]"))return;
+  touch.deferred=false;
+  setTimeout(()=>render(),0);
+},true);
 function showToast(message){const el=$("#toast");el.textContent=message;el.classList.add("show");clearTimeout(showToast.timer);showToast.timer=setTimeout(()=>el.classList.remove("show"),2300)}
 
 // The mobile drawer's visible state and its aria-expanded disclosure must
