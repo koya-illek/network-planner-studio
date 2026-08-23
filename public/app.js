@@ -715,6 +715,9 @@ $("#canvas").addEventListener("pointerdown",e=>{
   activePointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
   if(activePointers.size===2){
     if(drag&&!drag.moved){undoStack.pop();updateHistoryButtons()}
+    // A drag displaced before the pinch took over is a real edit: settle it
+    // through the normal save pipeline instead of stranding it unsaved.
+    else if(drag&&drag.moved)touch();
     drag=null;panDrag=null;
     const [a,b]=activePointers.values();
     pinch={dist:Math.hypot(a.x-b.x,a.y-b.y)||1,zoom:canvasZoom};

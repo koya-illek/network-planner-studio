@@ -352,6 +352,29 @@ test("restores a dragged node when the gesture is cancelled", async ({ page }) =
   await expect(page.locator("#undo-button")).toBeDisabled();
 });
 
+test("settles a moved node drag when a pinch takes over", async ({ page }) => {
+  await page.locator(".topology-node").first().waitFor();
+  const storedX = () => page.evaluate(() => JSON.parse(localStorage.getItem("network-planner-studio.v1")).sites[0].x);
+  const before = await storedX();
+  await page.evaluate(() => {
+    const canvas = document.querySelector("#canvas");
+    const box = canvas.getBoundingClientRect();
+    const nb = document.querySelector(".topology-node").getBoundingClientRect();
+    const mk = (type, id, x, y) => new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: id, pointerType: "touch", isPrimary: id === 21, clientX: x, clientY: y });
+    document.elementFromPoint(nb.left + 10, nb.top + 10).dispatchEvent(mk("pointerdown", 21, nb.left + 10, nb.top + 10));
+    for (let i = 1; i <= 8; i++) canvas.dispatchEvent(mk("pointermove", 21, nb.left + 10 + i * 6, nb.top + 10));
+    canvas.dispatchEvent(mk("pointerdown", 22, box.left + 20, box.bottom - 20));
+    for (let i = 1; i <= 4; i++) {
+      canvas.dispatchEvent(mk("pointermove", 21, nb.left + 58 - i * 3, nb.top + 10));
+      canvas.dispatchEvent(mk("pointermove", 22, box.left + 20 - i * 3, box.bottom - 20));
+    }
+    canvas.dispatchEvent(mk("pointerup", 21, nb.left + 46, nb.top + 10));
+    canvas.dispatchEvent(mk("pointerup", 22, box.left + 8, box.bottom - 20));
+  });
+  await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+  expect(await storedX()).toBeGreaterThan(before);
+});
+
 test("keeps focus recoverable when a background save-render lands during a dialog", async ({ page }) => {
   await page.locator(".add-vlan-mini").first().focus();
   await page.keyboard.press("Enter");
