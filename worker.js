@@ -16,7 +16,6 @@ export default {
     // Canonical host redirect: legacy/staging hostnames 301 to network.illek.ie.
     const redirect = redirectForRequest(request);
     if (redirect) return redirect;
-
     if (url.pathname === "/api/health") {
       const headers = new Headers(SECURITY_HEADERS);
       headers.set("X-Robots-Tag", "noindex, nofollow");
@@ -49,15 +48,23 @@ export function redirectForRequest(request) {
   // Wrangler tests use localhost/127.0.0.1 URLs directly.
   const localRequest = isLocalDevelopmentHost(url.hostname);
   if (!localRequest && url.hostname !== "network.illek.ie") {
-    url.hostname = "network.illek.ie";
-    url.protocol = "https:";
-    return Response.redirect(url.toString(), 301);
+    return redirectResponse(url, 301, "network.illek.ie");
   }
   if (url.protocol === "http:" && !localRequest) {
-    url.protocol = "https:";
-    return Response.redirect(url.toString(), 308);
+    return redirectResponse(url, 308);
   }
   return null;
+}
+
+// Redirects are responses too: they carry the same hardening headers as
+// content, so alias hops still deliver HSTS and intermediaries never see an
+// unhardened hop.
+function redirectResponse(url, status, hostname) {
+  if (hostname) url.hostname = hostname;
+  url.protocol = "https:";
+  const headers = new Headers(SECURITY_HEADERS);
+  headers.set("Location", url.toString());
+  return new Response(null, { status, headers });
 }
 
 function isLocalDevelopmentHost(hostname) {
