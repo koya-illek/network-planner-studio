@@ -541,8 +541,10 @@ test("quarantines an unreadable project library instead of erasing it", async ({
   await page.locator("#projects-button").click();
   const quarantined = await page.evaluate(() => localStorage.getItem("network-planner-studio.projects.v1.unreadable"));
   expect(quarantined).toBe("{not json");
-  await expect(page.locator("#project-list")).toContainText("No saved designs yet.");
+  await expect(page.locator("#project-list")).toContainText("Illek example network");
   await expect(page.locator("#toast")).toContainText("could not be read");
+  const reseeded = await page.evaluate(() => Object.keys(JSON.parse(localStorage.getItem("network-planner-studio.projects.v1"))));
+  expect(reseeded).toHaveLength(1);
   await page.keyboard.press("Escape");
 });
 
@@ -566,6 +568,16 @@ test("canvas nodes and links announce health and resilience in words", async ({ 
 
 test("trace progress is a live region", async ({ page }) => {
   await expect(page.locator("#trace-detail")).toHaveAttribute("aria-live", "polite");
+});
+
+test("policy matrix keeps same-zone cells out of the cycle", async ({ page }) => {
+  await page.locator('[data-view="policy"]').click();
+  await expect(page.locator(".flow-cell-self").first()).toHaveText("same zone");
+  const selfTargets = await page.locator(".flow-cell[data-flow]").evaluateAll(nodes => nodes.filter(n => {
+    const [source, destination] = n.dataset.flow.split(":");
+    return source === destination;
+  }));
+  expect(selfTargets).toHaveLength(0);
 });
 
 test("escape clears the inspector selection", async ({ page }) => {

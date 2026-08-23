@@ -101,7 +101,7 @@ textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(77,163,255,.2)
 .topology-node.role-hub{border-color:#39d6c3;box-shadow:0 0 0 1px rgba(57,214,195,.16),0 12px 28px rgba(0,0,0,.38)}
 .topology-node.role-hub .node-icon{background:#135152;color:#a5fff2;font-size:9px}
 .canvas{cursor:grab}.canvas:active{cursor:grabbing}.topology-node{cursor:grab}
-.flow-cell{width:100%;border:1px solid var(--line);border-radius:7px;padding:7px;font-size:9px;font-weight:800;text-transform:uppercase;cursor:pointer}.flow-cell.allow{background:#103b3d;color:#76ead9}.flow-cell.restricted{background:#102f50;color:#8ecaff}.flow-cell.deny{background:#431f27;color:#ff9a94}.flow-matrix th:first-child{position:sticky;left:0;background:#091522}.empty-policy{padding:24px;color:var(--muted)}
+.flow-cell{width:100%;border:1px solid var(--line);border-radius:7px;padding:7px;font-size:9px;font-weight:800;text-transform:uppercase;cursor:pointer}.flow-cell.allow{background:#103b3d;color:#76ead9}.flow-cell.restricted{background:#102f50;color:#8ecaff}.flow-cell.deny{background:#431f27;color:#ff9a94}.flow-cell-self{display:block;text-align:center;padding:7px 0;color:var(--muted);font-size:9px;text-transform:uppercase;letter-spacing:.05em}.flow-matrix th:first-child{position:sticky;left:0;background:#091522}.empty-policy{padding:24px;color:var(--muted)}
 .node-copy small,.node-foot,.site-row small,.vlan-row code,.detail span,th,.review-item small,.flow-cell{font-size:10px}
 @media(max-width:720px){
   .mobile-only{display:block!important}

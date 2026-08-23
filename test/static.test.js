@@ -146,6 +146,7 @@ test("canvas health, link resilience and escape selection are wired", async () =
   assert.match(html, /id="trace-detail" aria-live="polite"/, "trace progress must be announced");
   assert.doesNotMatch(app, /walk=id=>/, "connectivity must not recurse per site");
   assert.match(app, /Escape is the keyboard counterpart of the inspector close button/);
+  assert.match(app, /roles\.filter\(destination=>destination!==source\)/, "the report must not present same-zone rows as policies");
 });
 
 test("iteration-7 keeps stored gateways and surfaces cross-tab conflicts", async () => {
