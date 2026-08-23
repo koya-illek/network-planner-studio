@@ -154,3 +154,29 @@ test("skips trace particles under prefers-reduced-motion", async ({ page }) => {
   await trace();
   expect(await page.locator(".route-particle").count()).toBe(0);
 });
+
+test("keeps keyboard focus when selection and policy edits re-render", async ({ page }) => {
+  await page.locator(".vlan-row").first().focus();
+  const vlanId = await page.locator(".vlan-row").first().getAttribute("data-vlan");
+  await page.keyboard.press("Enter");
+  await expect.poll(() => page.evaluate(() => `${document.activeElement.className.split(" ")[0]}[${document.activeElement.dataset.vlan || ""}]`)).toBe(`vlan-row[${vlanId}]`);
+
+  const siteId = await page.locator(".site-row-select").first().getAttribute("data-site");
+  await page.locator(".site-row-select").first().focus();
+  await page.keyboard.press("Enter");
+  await expect.poll(() => page.evaluate(() => `${document.activeElement.className.split(" ")[0]}[${document.activeElement.dataset.site || ""}]`)).toBe(`site-row-select[${siteId}]`);
+
+  await page.locator('[data-view="policy"]').click();
+  const cell = page.locator("[data-flow]").first();
+  await cell.focus();
+  const key = await cell.getAttribute("data-flow");
+  await cell.click();
+  await expect.poll(() => page.evaluate(() => document.activeElement?.dataset.flow || "")).toBe(key, { timeout: 2_000 });
+
+  await page.locator('[data-view="topology"]').click();
+  const nodeId = await page.locator(".topology-node").first().getAttribute("data-site");
+  await page.locator(".topology-node").first().focus();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(150);
+  expect(await page.evaluate(() => `${document.activeElement.className.split(" ")[0]}[${document.activeElement.dataset.site || ""}]`)).toBe(`topology-node[${nodeId}]`);
+});

@@ -115,7 +115,20 @@ function showHome(){
   window.scrollTo({top:0,behavior:"smooth"});
 }
 
+const FOCUS_IDENTITY=[[ "vlan-row","data-vlan"],["site-row-select","data-site"],["topology-node","data-site"],["link-hit","data-link"]];
+function focusKeeper(){
+  const el=document.activeElement;
+  if(!el||el===document.body)return null;
+  for(const [cls,attr] of FOCUS_IDENTITY)if(el.classList.contains(cls)&&el.getAttribute(attr))return `.${cls}[${attr}="${CSS.escape(el.getAttribute(attr))}"]`;
+  if(el.dataset.flow)return `[data-flow="${CSS.escape(el.dataset.flow)}"]`;
+  return null;
+}
+function restoreFocus(keeper){
+  if(!keeper||document.activeElement!==document.body)return;
+  $(keeper)?.focus({preventScroll:true});
+}
 function render(){
+  const keeper=focusKeeper();
   stopTrace();
   reviewCache=null;
   $("#project-name-button").textContent=state.name;
@@ -128,6 +141,7 @@ function render(){
   $("#topology-mode").textContent=state.topologyMode==="hub-spoke"?"Hub & spoke":state.topologyMode==="mesh"?"Mesh":"Custom";
   updateHistoryButtons();
   $("#empty-canvas").classList.toggle("hidden",state.sites.length>0);
+  restoreFocus(keeper);
 }
 function activateView(view, moveFocus=false){
   $$('[data-view]').forEach(button=>{const active=button.dataset.view===view;button.classList.toggle("active",active);button.setAttribute("aria-selected",String(active));button.tabIndex=active?0:-1});
@@ -659,7 +673,7 @@ $("#canvas").addEventListener("pointermove",e=>{
 });
 $("#canvas").addEventListener("pointerup",()=>{if(panDrag){panDrag=null;return}if(!drag)return;if(drag.moved)touch();else{undoStack.pop();updateHistoryButtons();selected={type:"site",id:drag.site.id};render()}drag=null});
 $("#canvas").addEventListener("wheel",e=>{if(!e.ctrlKey)return;e.preventDefault();canvasZoom=Math.max(.7,Math.min(1.5,canvasZoom+(e.deltaY<0?.1:-.1)));applyCanvasZoom()},{passive:false});
-let resizeFrame=null;window.addEventListener("resize",()=>{stopTrace();cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(renderCanvas)});
+let resizeFrame=null;window.addEventListener("resize",()=>{stopTrace();cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(()=>{const keeper=focusKeeper();renderCanvas();restoreFocus(keeper)})});
 
 function findVlan(id){for(const site of state.sites){const vlan=site.vlans.find(v=>v.id===id);if(vlan)return{site,vlan}}return null}
 function safeParse(cidr){try{return parseCidr(cidr)}catch{return null}}
