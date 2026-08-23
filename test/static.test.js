@@ -159,6 +159,7 @@ test("iteration-9 keeps interrupted gestures honest", async () => {
   const app = await readFile(new URL("public/app.js", root), "utf8");
   assert.match(app, /if\(!commit\)\{drag\.site\.x=drag\.x;drag\.site\.y=drag\.y;if\(drag\.moved\)renderCanvas\(\)\}/, "a cancelled drag must restore the pre-drag coordinates before dropping the history entry");
   assert.match(app, /else if\(drag&&drag\.moved\)touch\(\)/, "a moved drag swallowed by a pinch must settle through the save pipeline");
-  assert.match(app, /now-nudgeBurstAt>600/, "keyboard nudges must coalesce into one history entry per burst");
+  assert.match(app, /nudgeBurst\.siteId!==site\.id\|\|now-nudgeBurst\.at>600/, "keyboard nudges must coalesce only for the same node in one burst");
+  assert.match(app, /function restoreHistory\([\s\S]*?nudgeBurst=\{siteId:null,at:0\}/, "undo and redo must close the current nudge burst");
   assert.ok(!app.includes("setTimeout(saveState,220)"), "nudge saves must flow through the shared touch pipeline");
 });

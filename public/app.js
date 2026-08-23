@@ -37,7 +37,7 @@ let panDrag = null;
 let canvasDirty = false;
 let activePointers = new Map();
 let pinch = null;
-let nudgeBurstAt = 0;
+let nudgeBurst = {siteId:null,at:0};
 
 function blankState() {
   return {schema:SCHEMA_ID,version:SCHEMA_VERSION,projectId:uid(),name:"Untitled network",mode:null,topologyMode:"custom",policies:{spokeToSpoke:"via-hub",centralizedInspection:false,secondaryHubId:null},flowPolicies:{},assumptions:[],sites:[],links:[],updatedAt:new Date().toISOString()};
@@ -82,11 +82,11 @@ function saveState(){
   if(!saved||!librarySaved) showToast(storageIssue);
 }
 function pushHistory(){
-  undoStack.push(JSON.stringify(state));if(undoStack.length>40)undoStack.shift();redoStack=[];updateHistoryButtons();
+  undoStack.push(JSON.stringify(state));if(undoStack.length>40)undoStack.shift();redoStack=[];nudgeBurst={siteId:null,at:0};updateHistoryButtons();
 }
 function reviveDesign(raw){try{return migrateDesign(raw)}catch{return migrateDesign(raw,{strict:false})}}
 function restoreHistory(source,target){
-  if(!source.length)return;target.push(JSON.stringify(state));state=reviveDesign(JSON.parse(source.pop()));selected=null;saveState();render();updateHistoryButtons();
+  if(!source.length)return;target.push(JSON.stringify(state));state=reviveDesign(JSON.parse(source.pop()));selected=null;nudgeBurst={siteId:null,at:0};saveState();render();updateHistoryButtons();
 }
 function updateHistoryButtons(){
   $("#undo-button").disabled=!undoStack.length;$("#redo-button").disabled=!redoStack.length;
@@ -117,7 +117,7 @@ function setMobileSites(open){
 function start(mode){
   if(mode==="sample") state=sampleState();
   else {state=blankState();state.mode=mode}
-  undoStack=[];redoStack=[];updateHistoryButtons();
+  undoStack=[];redoStack=[];nudgeBurst={siteId:null,at:0};updateHistoryButtons();
   saveState();window.scrollTo({top:0,left:0,behavior:"auto"});$("#welcome").classList.add("hidden");$("#workspace").classList.remove("hidden");render();
   if(mode!=="sample") openSiteDialog();
 }
@@ -272,8 +272,8 @@ let reviewCache=null;
 function reviewDesign(){
   if(reviewCache)return reviewCache;
   const issues=[];
-  if(!state.sites.length)return[{severity:"info",title:"Start the address hierarchy",message:"Add a site with a parent IPv4 range and create VLANs inside it."}];
   for(const message of state.importWarnings||[])issues.push(issue("warning","Recovered design data",message));
+  if(!state.sites.length)return[...issues,{severity:"info",title:"Start the address hierarchy",message:"Add a site with a parent IPv4 range and create VLANs inside it."}];
   for(let i=0;i<state.sites.length;i++){
     const s=state.sites[i],sp=safeParse(s.cidr);
     if(!sp)issues.push(issue("error","Invalid site range",`${s.name} does not have a valid IPv4 CIDR range.`,s.id));
@@ -380,9 +380,9 @@ function renderProjectLibrary(){
 }
 function openProjects(){saveState();renderProjectLibrary();$("#projects-dialog").showModal()}
 function duplicateProject(){
-  saveState();state=reviveDesign(JSON.parse(JSON.stringify(state)));state.projectId=uid();state.name=`${state.name} copy`;state.mode=state.mode||"existing";undoStack=[];redoStack=[];saveState();renderProjectLibrary();render();showToast("Design duplicated");
+  saveState();state=reviveDesign(JSON.parse(JSON.stringify(state)));state.projectId=uid();state.name=`${state.name} copy`;state.mode=state.mode||"existing";undoStack=[];redoStack=[];nudgeBurst={siteId:null,at:0};saveState();renderProjectLibrary();render();showToast("Design duplicated");
 }
-function newProject(){state=blankState();state.mode="new";selected=null;undoStack=[];redoStack=[];saveState();$("#projects-dialog").close();enterWorkspace();render();openSiteDialog()}
+function newProject(){state=blankState();state.mode="new";selected=null;undoStack=[];redoStack=[];nudgeBurst={siteId:null,at:0};saveState();$("#projects-dialog").close();enterWorkspace();render();openSiteDialog()}
 
 function openSiteDialog(siteId=null){
   editingSiteId=siteId;const form=$("#site-form");form.reset();form.elements.devices.value=50;
@@ -598,7 +598,7 @@ document.addEventListener("click",e=>{
   if(e.target.closest("#duplicate-project"))return duplicateProject();
   if(e.target.closest("#new-project"))return newProject();
   if(e.target.closest("#print-report"))return window.print();
-  const openProject=e.target.closest("[data-open-project]");if(openProject){const project=loadLibrary()[openProject.dataset.openProject];if(project){state=reviveDesign(project);selected=null;undoStack=[];redoStack=[];saveState();$("#projects-dialog").close();enterWorkspace();render();showToast(`${state.name} opened`)}return}
+  const openProject=e.target.closest("[data-open-project]");if(openProject){const project=loadLibrary()[openProject.dataset.openProject];if(project){state=reviveDesign(project);selected=null;undoStack=[];redoStack=[];nudgeBurst={siteId:null,at:0};saveState();$("#projects-dialog").close();enterWorkspace();render();showToast(`${state.name} opened`)}return}
   const deleteProject=e.target.closest("[data-delete-project]");if(deleteProject&&confirm("Delete this locally saved design?")){const library=loadLibrary();delete library[deleteProject.dataset.deleteProject];storageSet(LIBRARY_KEY,JSON.stringify(library));renderProjectLibrary();showToast("Design deleted");return}
   const recommendVlan=e.target.closest("[data-recommend-vlan]");if(recommendVlan)return openRecommendDialog("vlan",recommendVlan.dataset.recommendVlan);
   const recommendKind=e.target.closest("[data-recommend-kind]");if(recommendKind)return setRecommendationKind(recommendKind.dataset.recommendKind);
@@ -640,8 +640,8 @@ document.addEventListener("keydown",e=>{
     e.preventDefault();const site=state.sites.find(s=>s.id===node.dataset.site);if(!site)return;
     // One undo entry per nudge burst, so keyboard moves match pointer drags.
     const now=Date.now();
-    if(now-nudgeBurstAt>600){pushHistory();updateHistoryButtons()}
-    nudgeBurstAt=now;
+    if(nudgeBurst.siteId!==site.id||now-nudgeBurst.at>600)pushHistory();
+    nudgeBurst={siteId:site.id,at:now};
     if(e.key==="ArrowLeft")site.x=Math.max(0,site.x-2);
     if(e.key==="ArrowRight")site.x=Math.min(82,site.x+2);
     if(e.key==="ArrowUp")site.y=Math.max(0,site.y-2);
@@ -772,7 +772,7 @@ window.addEventListener("pagehide",()=>{if(touch.timer){clearTimeout(touch.timer
 window.addEventListener("storage",e=>{
   if(e.key!==STORAGE_KEY||!e.newValue)return;
   let incoming=null;try{incoming=JSON.parse(e.newValue)}catch{}
-  if(!incoming||incoming.projectId===state.projectId&&String(incoming.updatedAt)!==String(state.updatedAt))showToast("This design changed in another browser tab. Reload here or use Projects to pick the version to keep.");
+  if(!incoming||incoming.projectId===state.projectId&&String(incoming.updatedAt)!==String(state.updatedAt))showToast("This design changed in another browser tab. Export this tab before reloading, or continue here to overwrite the other version.");
 });
 
 function findVlan(id){for(const site of state.sites){const vlan=site.vlans.find(v=>v.id===id);if(vlan)return{site,vlan}}return null}

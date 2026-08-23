@@ -484,6 +484,21 @@ test("makes an arrow-key nudge burst undoable and redoable", async ({ page }) =>
   expect(await storedX()).toBe(moved);
 });
 
+test("keeps rapid keyboard nudges on different nodes in separate history entries", async ({ page }) => {
+  const nodes = page.locator(".topology-node");
+  const positions = () => page.evaluate(() => JSON.parse(localStorage.getItem("network-planner-studio.v1")).sites.slice(0,2).map(site => site.x));
+  await nodes.nth(0).focus();
+  await page.keyboard.press("ArrowRight");
+  await nodes.nth(1).focus();
+  await page.keyboard.press("ArrowRight");
+  await page.locator("#utility-menu > summary").click();
+  await page.locator("#undo-button").click();
+  expect(await positions()).toEqual([44,70]);
+  await page.locator("#utility-menu > summary").click();
+  await page.locator("#undo-button").click();
+  expect(await positions()).toEqual([42,70]);
+});
+
 test("keeps focus recoverable when a background save-render lands during a dialog", async ({ page }) => {
   await page.locator(".add-vlan-mini").first().focus();
   await page.keyboard.press("Enter");
