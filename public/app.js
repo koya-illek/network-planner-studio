@@ -1,4 +1,4 @@
-import {SCHEMA_ID,SCHEMA_VERSION,ENUMS,parseCidr,parseRoutePrefix,rangesOverlap,contains,firstUsable,endpointCapacity,defaultDhcpPool,validateGateway,validateDhcpPool,prefixForDevices,nextSubnet,suggestSiteRange as suggestSiteRangeCore,isPrivateCidr,isPrivateRoutePrefix,guardCsvCell,unguardCsvCell,shortestPath,migrateDesign,createSite,createVlan,createLink} from "./network-core.js";
+import {SCHEMA_ID,SCHEMA_VERSION,ENUMS,parseCidr,parseRoutePrefix,rangesOverlap,contains,firstUsable,endpointCapacity,defaultDhcpPool,validateGateway,validateDhcpPool,prefixForDevices,nextSubnet,suggestSiteRange as suggestSiteRangeCore,isPrivateCidr,isPrivateRoutePrefix,guardCsvCell,unguardCsvCell,parseCsvRows,shortestPath,migrateDesign,createSite,createVlan,createLink} from "./network-core.js";
 
 const STORAGE_KEY = "network-planner-studio.v1";
 const LIBRARY_KEY = "network-planner-studio.projects.v1";
@@ -662,16 +662,12 @@ $("#file-input").addEventListener("change",async e=>{
   if(file.size>IMPORT_MAX_BYTES){showToast(`Import failed: ${file.name} is larger than 10 MB`);e.target.value="";return}
   try{const text=await file.text(),raw=file.name.toLowerCase().endsWith(".csv")?designFromCsv(text):JSON.parse(text),imported=file.name.toLowerCase().endsWith(".csv")?raw:migrateDesign(raw,{strict:true});pushHistory();state=imported;state.mode="imported";selected=null;saveState();enterWorkspace();render();showToast(`${file.name.toLowerCase().endsWith(".csv")?"CSV":"Design"} imported and validated`)}catch(err){showToast(`Import failed: ${err.message}`)}e.target.value="";
 });
-function parseCsvLine(line){
-  const values=[];let value="",quoted=false;
-  for(let i=0;i<line.length;i++){const c=line[i];if(c==='"'&&quoted&&line[i+1]==='"'){value+='"';i++}else if(c==='"')quoted=!quoted;else if(c===","&&!quoted){values.push(value);value=""}else value+=c}values.push(value);return values;
-}
 function designFromCsv(text){
-  const lines=text.replace(/^\uFEFF/,"").split(/\r?\n/).filter(line=>line.trim());if(lines.length<2)throw new Error("CSV must include a header and at least one address record");
-  const headers=parseCsvLine(lines[0]).map(h=>h.trim().toLowerCase()),required=headers.includes("record type")?["record type","site range"]:["site","site range","vlan","subnet"];
+  const rows=parseCsvRows(text).filter(row=>row.some(value=>value.trim()));if(rows.length<2)throw new Error("CSV must include a header and at least one address record");
+  const headers=rows[0].map(h=>h.trim().toLowerCase()),required=headers.includes("record type")?["record type","site range"]:["site","site range","vlan","subnet"];
   if(required.some(h=>!headers.includes(h)))throw new Error(`CSV requires columns: ${required.join(", ")}`);
   const decode=(value,key)=>{let textValue=String(value??"").trim();if(!textValue)return"";textValue=unguardCsvCell(textValue);if(["policies","flow policies","assumptions","links"].includes(key)){try{return JSON.parse(textValue)}catch{throw new Error(`CSV ${key} metadata is not valid JSON`)}}if(key==="site notes"||key==="vlan notes"){try{return JSON.parse(textValue)}catch{return textValue}}return textValue};
-  const records=lines.slice(1).map(line=>Object.fromEntries(parseCsvLine(line).map((value,index)=>[headers[index],decode(value,headers[index])]))) ,sites=[],siteById=new Map();let metadata=null;
+  const records=rows.slice(1).map(values=>Object.fromEntries(headers.map((header,index)=>[header,decode(values[index],header)]))),sites=[],siteById=new Map();let metadata=null;
   for(const record of records){
     if(record["record type"]==="design")metadata=record;
     const siteKey=record["site id"]||record.site||uid();

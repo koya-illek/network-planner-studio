@@ -293,6 +293,53 @@ export function unguardCsvCell(value) {
   return text.length > 1 && text[0] === "'" && needsFormulaGuard(text.slice(1)) ? text.slice(1) : text;
 }
 
+/** Parse RFC 4180 records, including escaped quotes and line breaks in quoted fields. */
+export function parseCsvRows(value) {
+  const text = String(value ?? "").replace(/^\uFEFF/, "");
+  const rows = [];
+  let row = [], field = "", state = "start";
+
+  const finishField = () => { row.push(field); field = ""; state = "start"; };
+  const finishRow = () => { finishField(); rows.push(row); row = []; };
+
+  for (let index = 0; index < text.length; index++) {
+    const character = text[index];
+    if (state === "quoted") {
+      if (character !== '"') { field += character; continue; }
+      if (text[index + 1] === '"') { field += '"'; index++; continue; }
+      state = "after-quote";
+      continue;
+    }
+    if (state === "after-quote") {
+      if (character === ",") { finishField(); continue; }
+      if (character === "\r" || character === "\n") {
+        finishRow();
+        if (character === "\r" && text[index + 1] === "\n") index++;
+        continue;
+      }
+      if (character === " " || character === "\t") continue;
+      throw new Error("CSV contains content after a closing quote");
+    }
+    if (character === '"') {
+      if (state !== "start") throw new Error("CSV contains an unexpected quote");
+      state = "quoted";
+      continue;
+    }
+    if (character === ",") { finishField(); continue; }
+    if (character === "\r" || character === "\n") {
+      finishRow();
+      if (character === "\r" && text[index + 1] === "\n") index++;
+      continue;
+    }
+    field += character;
+    state = "unquoted";
+  }
+
+  if (state === "quoted") throw new Error("CSV contains an unclosed quoted field");
+  if (row.length || field || state !== "start") finishRow();
+  return rows;
+}
+
 export function shortestPath(sites, links, from, to, { topologyMode = "custom", spokeToSpoke = "via-hub" } = {}) {
   if (from === to) return { sites: [from], links: [] };
   const byId = new Map(sites.map(site => [site.id, site]));

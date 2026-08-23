@@ -36,7 +36,7 @@ data flow, privacy boundary, deployment topology, and external dependencies.
 - Local persistence and JSON import/export
 - Multiple local projects with duplicate, open and delete workflows
 - Print-ready implementation report for PDF handoff
-- Versioned JSON migration plus CSV address-plan import/export
+- Versioned JSON migration plus RFC 4180 CSV address-plan import/export
 - Zoom, pan, pinch, fit-to-screen, undoable keyboard nudges, drag-cancel snap-back and a mobile site drawer
 - Responsive desktop and mobile layouts
 

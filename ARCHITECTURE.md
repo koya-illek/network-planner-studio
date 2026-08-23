@@ -111,7 +111,7 @@ There is no runtime database, analytics service, authentication provider, remote
 - Dynamic values are escaped or enum-constrained before rendering.
 - Storage failure is reported to the user rather than silently discarding changes.
 - Exported files become the user's responsibility once downloaded or shared.
-- Exported CSV cells use a reversible spreadsheet-formula guard, including values with a legitimate leading apostrophe and formulas hidden behind whitespace.
+- CSV import accepts RFC 4180 quoted commas, escaped quotes, and multiline fields. Exported cells use a reversible spreadsheet-formula guard, including values with a legitimate leading apostrophe and formulas hidden behind whitespace.
 - Animation respects `prefers-reduced-motion`: hero flow lines, pulse indicators and trace particles are disabled when reduced motion is requested.
 
 ## Interfaces

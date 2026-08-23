@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   parseCidr,rangesOverlap,contains,endpointCapacity,prefixForDevices,nextSubnet,
-  suggestSiteRange,isPrivateCidr,isPrivateRoutePrefix,shortestPath,migrateDesign,defaultDhcpPool,validHostInSubnet,parseRoutePrefix,validateGateway,validateDhcpPool,validateDesign,guardCsvCell,unguardCsvCell,intToIp,firstUsable,SCHEMA_ID,SCHEMA_VERSION
+  suggestSiteRange,isPrivateCidr,isPrivateRoutePrefix,shortestPath,migrateDesign,defaultDhcpPool,validHostInSubnet,parseRoutePrefix,validateGateway,validateDhcpPool,validateDesign,guardCsvCell,unguardCsvCell,parseCsvRows,intToIp,firstUsable,SCHEMA_ID,SCHEMA_VERSION
 } from "../public/network-core.js";
 
 test("parses LAN and point-to-point IPv4 networks",()=>{
@@ -228,4 +228,18 @@ test("CSV export cells neutralize formula injection and round-trip losslessly",(
   for(const apostrophe of ["'=literal","'+353","'-flag","'@name","'plain","''nested"]){
     assert.equal(unguardCsvCell(guardCsvCell(apostrophe)),apostrophe);
   }
+});
+
+test("CSV records preserve quoted commas, escaped quotes and multiline fields",()=>{
+  const csv='\uFEFFName,Notes,Empty\r\n"Cork, IE","Firewall ""handoff""\r\nRack 4",\r\n';
+  assert.deepEqual(parseCsvRows(csv),[
+    ["Name","Notes","Empty"],
+    ["Cork, IE",'Firewall "handoff"\r\nRack 4',""],
+  ]);
+});
+
+test("CSV records reject malformed quote boundaries",()=>{
+  assert.throws(()=>parseCsvRows('Name,Notes\nCork,"unfinished'),/unclosed quoted field/);
+  assert.throws(()=>parseCsvRows('Name,Notes\nCork,bad"quote'),/unexpected quote/);
+  assert.throws(()=>parseCsvRows('Name,Notes\nCork,"done"tail'),/content after a closing quote/);
 });

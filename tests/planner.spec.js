@@ -102,6 +102,16 @@ test("imports a validated CSV address plan", async ({ page }) => {
   await expect(page.locator(".vlan-row")).toContainText("Staff");
 });
 
+test("imports RFC 4180 multiline CSV fields", async ({ page }) => {
+  const csv='Site,Role,Site range,VLAN,VLAN name,Purpose,Subnet,Gateway,Devices,DHCP,Reserved,Site notes,VLAN notes\r\nCork,standalone,10.44.0.0/16,10,Staff,users,10.44.10.0/24,10.44.10.1,80,enabled,1,"First line\r\nSecond line","Firewall ""handoff""\r\nRack 4"';
+  await page.locator("#file-input").setInputFiles({name:"multiline.csv",mimeType:"text/csv",buffer:Buffer.from(csv)});
+  await expect(page.locator("#toast")).toContainText("CSV imported and validated");
+  await expect.poll(() => page.evaluate(() => {
+    const design=JSON.parse(localStorage.getItem("network-planner-studio.v1"));
+    return {site:design.sites[0].notes,vlan:design.sites[0].vlans[0].notes};
+  })).toEqual({site:"First line\r\nSecond line",vlan:'Firewall "handoff"\r\nRack 4'});
+});
+
 test("builds a safe default DHCP pool for a custom CSV gateway", async ({ page }) => {
   const csv="Site,Role,Site range,VLAN,VLAN name,Purpose,Subnet,Gateway,Devices,DHCP,Reserved\nCork,standalone,10.44.0.0/16,10,Staff,users,10.44.10.0/24,10.44.10.254,80,enabled,1";
   await page.locator("#file-input").setInputFiles({name:"custom-gateway.csv",mimeType:"text/csv",buffer:Buffer.from(csv)});
