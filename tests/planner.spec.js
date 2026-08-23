@@ -102,6 +102,12 @@ test("imports a validated CSV address plan", async ({ page }) => {
   await expect(page.locator(".vlan-row")).toContainText("Staff");
 });
 
+test("builds a safe default DHCP pool for a custom CSV gateway", async ({ page }) => {
+  const csv="Site,Role,Site range,VLAN,VLAN name,Purpose,Subnet,Gateway,Devices,DHCP,Reserved\nCork,standalone,10.44.0.0/16,10,Staff,users,10.44.10.0/24,10.44.10.254,80,enabled,1";
+  await page.locator("#file-input").setInputFiles({name:"custom-gateway.csv",mimeType:"text/csv",buffer:Buffer.from(csv)});
+  await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem("network-planner-studio.v1")).sites[0].vlans[0])).toMatchObject({gateway:"10.44.10.254",dhcpStart:"10.44.10.2",dhcpEnd:"10.44.10.253"});
+});
+
 test("duplicates and reopens local projects", async ({ page }) => {
   await page.locator("#utility-menu > summary").click();
   await page.locator("#projects-button").click();
