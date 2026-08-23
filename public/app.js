@@ -184,7 +184,7 @@ function renderCanvas(){
   }
   for(const site of state.sites){
     const node=document.createElement("div"),position=point(site);node.className=`topology-node role-${site.topologyRole||"standalone"} ${selected?.type==="site"&&selected.id===site.id?"selected":""}`;node.dataset.site=site.id;node.tabIndex=0;node.setAttribute("role","button");node.setAttribute("aria-label",`${site.name}, ${site.topologyRole||"standalone"} site, ${site.cidr}`);
-    node.style.left=`${position.left}px`;node.style.top=`${position.top}px`;
+    node.style.left=`${position.left}px`;node.style.top=`${position.top}px`;node.style.width=`${nodeWidth}px`;
     const health=siteHealth(site);
     node.innerHTML=`<div class="node-head"><span class="node-icon">${site.topologyRole==="hub"?"HUB":TYPE_ICONS[site.type]||"ST"}</span><span class="node-copy"><strong>${escapeHtml(site.name)}</strong><small>${escapeHtml(site.cidr)} · ${escapeHtml(site.topologyRole||"standalone")}</small></span></div><div class="node-foot"><span><i class="health-dot ${health}"></i>${site.vlans.length} VLAN${site.vlans.length===1?"":"s"}</span><span>${site.devices} devices</span></div>`;
     layer.append(node);

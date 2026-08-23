@@ -155,6 +155,23 @@ test("skips trace particles under prefers-reduced-motion", async ({ page }) => {
   expect(await page.locator(".route-particle").count()).toBe(0);
 });
 
+test("keeps topology nodes inside the canvas on tablet widths", async ({ page }) => {
+  await page.setViewportSize({ width: 768, height: 900 });
+  await page.waitForTimeout(250);
+  const boxes = await page.evaluate(() => {
+    const canvas = document.querySelector("#canvas").getBoundingClientRect();
+    return [...document.querySelectorAll(".topology-node")].map(node => ({
+      width: node.offsetWidth,
+      overhang: Math.round(node.getBoundingClientRect().right - canvas.right)
+    }));
+  });
+  expect(boxes.length).toBeGreaterThan(0);
+  for (const box of boxes) {
+    expect(box.width).toBe(150);
+    expect(box.overhang).toBeLessThanOrEqual(1);
+  }
+});
+
 test("keeps keyboard focus when selection and policy edits re-render", async ({ page }) => {
   await page.locator(".vlan-row").first().focus();
   const vlanId = await page.locator(".vlan-row").first().getAttribute("data-vlan");
