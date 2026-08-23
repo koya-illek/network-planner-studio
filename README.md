@@ -25,6 +25,7 @@ data flow, privacy boundary, deployment topology, and external dependencies.
 - Hub-and-spoke policy wizard with radial auto-layout
 - Multi-hop animated route tracing through transit hubs
 - Static or BGP routing intent, advertised prefixes and default routes
+- Connection notes preserved in the planner and implementation report
 - Address overlap, containment and capacity validation
 - Single-WAN, segmentation and management-network design guidance
 - Editable gateways, gateway-aware capacity, DHCP reservations and `/31` transit networks

@@ -189,7 +189,7 @@
     <form method="dialog" id="site-form">
       <div class="dialog-heading"><div><h2 id="site-dialog-title">Add a site</h2><p>Give this location a parent address range. VLANs will be allocated inside it.</p></div><button class="dialog-close" type="button" data-close-dialog aria-label="Close">×</button></div>
       <div class="form-grid">
-        <label class="wide">Site name<input name="name" required placeholder="e.g. Cork office"></label>
+        <label class="wide">Site name<input name="name" required maxlength="100" placeholder="e.g. Cork office"></label>
         <label>Site type<select name="type"><option value="office">Office</option><option value="branch">Branch</option><option value="datacentre">Data centre</option><option value="cloud">Cloud</option><option value="warehouse">Warehouse</option></select></label>
         <label>Estimated devices<input name="devices" type="number" min="1" max="50000" value="50"></label>
         <label class="wide">Existing site range <span class="optional">(optional)</span><input name="cidr" placeholder="e.g. 10.20.0.0/16"><small>Leave blank and the planner will recommend a non-overlapping range.</small></label>
@@ -197,7 +197,7 @@
         <label>Growth allowance<select name="growth"><option value="30">30% recommended</option><option value="20">20%</option><option value="50">50%</option><option value="0">No allowance</option></select></label>
         <label>Topology role<select name="topologyRole"><option value="standalone">Standalone</option><option value="hub">Hub</option><option value="spoke">Spoke</option></select></label>
         <label>Internet breakout<select name="internetBreakout"><option value="local">Local</option><option value="hub">Through hub</option><option value="none">None</option></select></label>
-        <label class="wide">Design notes<textarea name="notes" placeholder="Assumptions, ownership, constraints…"></textarea></label>
+        <label class="wide">Design notes<textarea name="notes" maxlength="2000" placeholder="Assumptions, ownership, constraints…"></textarea></label>
       </div>
       <div id="site-form-error" class="form-error" aria-live="polite"></div>
       <div class="dialog-actions"><button class="button ghost" type="button" data-close-dialog>Cancel</button><button class="button primary" id="site-submit" type="submit">Add site</button></div>
@@ -209,7 +209,7 @@
       <div class="dialog-heading"><div><h2 id="vlan-dialog-title">Add a VLAN</h2><p>Enter an existing subnet or let the planner allocate one inside the site range.</p></div><button class="dialog-close" type="button" data-close-dialog aria-label="Close">×</button></div>
       <div class="form-grid">
         <label class="wide">Site<select name="siteId" required></select></label>
-        <label>VLAN name<input name="name" required placeholder="e.g. Staff"></label>
+        <label>VLAN name<input name="name" required maxlength="100" placeholder="e.g. Staff"></label>
         <label>VLAN ID<input name="vid" type="number" min="1" max="4094" required value="10"></label>
         <label>Purpose<select name="role"><option value="users">Staff / users</option><option value="voice">Voice</option><option value="guest">Guest Wi-Fi</option><option value="iot">IoT / CCTV</option><option value="servers">Servers</option><option value="management">Network management</option><option value="transit">Transit</option><option value="other">Other</option></select></label>
         <label>Devices needed<input name="devices" type="number" min="1" max="65534" value="30" required></label>
@@ -219,7 +219,7 @@
         <label>Low addresses reserved<input name="reserved" type="number" min="1" max="1000" value="1"><small>Reserves the first usable addresses. A gateway outside that block is excluded separately.</small></label>
         <label>DHCP pool start <span class="optional">(optional)</span><input name="dhcpStart" placeholder="Automatically calculated"></label>
         <label>DHCP pool end <span class="optional">(optional)</span><input name="dhcpEnd" placeholder="Automatically calculated"></label>
-        <label class="wide">Design notes<textarea name="notes" placeholder="DHCP exclusions, security zone, purpose…"></textarea></label>
+        <label class="wide">Design notes<textarea name="notes" maxlength="2000" placeholder="DHCP exclusions, security zone, purpose…"></textarea></label>
       </div>
       <div id="vlan-form-error" class="form-error" aria-live="polite"></div>
       <div class="dialog-actions"><button class="button ghost" type="button" data-close-dialog>Cancel</button><button class="button primary" id="vlan-submit" type="submit">Add VLAN</button></div>
@@ -238,6 +238,7 @@
         <label>Transit<select name="transitAllowed"><option value="true">Allow transit</option><option value="false">Endpoint only</option></select></label>
         <label class="wide check-label"><input name="defaultRoute" type="checkbox"> Advertise a default route over this connection</label>
         <label class="wide">Advertised IPv4 prefixes<input name="advertisedPrefixes" placeholder="e.g. 10.20.0.0/16, 10.30.0.0/16"><small>Leave blank when routing is learned elsewhere or not yet defined.</small></label>
+        <label class="wide">Design notes<textarea name="notes" maxlength="2000" placeholder="Provider, circuit reference, routing constraints…"></textarea></label>
       </div>
       <div id="connect-form-error" class="form-error" aria-live="polite"></div>
       <div class="dialog-actions"><button class="button ghost" type="button" data-close-dialog>Cancel</button><button class="button primary" id="connect-submit" type="submit">Create connection</button></div>
@@ -248,7 +249,7 @@
     <form method="dialog" id="name-form">
       <div class="dialog-heading"><div><h2 id="name-dialog-title">Name this design</h2></div><button class="dialog-close" type="button" data-close-dialog aria-label="Close">×</button></div>
       <label>Project name<input name="name" required maxlength="80"></label>
-      <label>Design assumptions<textarea name="assumptions" placeholder="One assumption per line"></textarea></label>
+      <label>Design assumptions<textarea name="assumptions" maxlength="20000" placeholder="One assumption per line"></textarea></label>
       <div class="dialog-actions"><button class="button ghost" type="button" data-close-dialog>Cancel</button><button class="button primary" type="submit">Save name</button></div>
     </form>
   </dialog>
@@ -262,7 +263,7 @@
       </div>
       <input name="kind" value="site" type="hidden">
       <div id="recommend-site-fields" class="form-grid">
-        <label class="wide">Site name<input name="siteName" placeholder="e.g. Limerick office" value="New office"></label>
+        <label class="wide">Site name<input name="siteName" maxlength="100" placeholder="e.g. Limerick office" value="New office"></label>
         <label>Site type<select name="siteType"><option value="office">Office</option><option value="branch">Branch</option><option value="warehouse">Warehouse</option><option value="datacentre">Data centre</option><option value="cloud">Cloud</option></select></label>
         <label>People / primary devices<input name="siteDevices" type="number" min="1" max="5000" value="50"></label>
         <label>Growth allowance<select name="siteGrowth"><option value="30">30% recommended</option><option value="20">20%</option><option value="50">50%</option></select></label>
@@ -272,7 +273,7 @@
         <label class="wide">Add to site<select name="vlanSite"></select></label>
         <label>Purpose<select name="vlanRole"><option value="users">Staff / users</option><option value="voice">Voice</option><option value="guest">Guest Wi-Fi</option><option value="iot">IoT / CCTV</option><option value="servers">Servers</option><option value="management">Network management</option><option value="transit">Transit</option><option value="other">Other</option></select></label>
         <label>Devices needed<input name="vlanDevices" type="number" min="1" max="65534" value="30"></label>
-        <label class="wide">VLAN name<input name="vlanName" placeholder="Suggested from purpose"></label>
+        <label class="wide">VLAN name<input name="vlanName" maxlength="100" placeholder="Suggested from purpose"></label>
       </div>
       <div id="recommend-preview" class="recommend-preview"></div>
       <div id="recommend-error" class="form-error" aria-live="polite"></div>

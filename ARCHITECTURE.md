@@ -62,7 +62,7 @@ The root schema identifier is `network-planner-studio/design`, version 3. The de
 - project metadata, assumptions, unresolved decisions, and release/schema provenance
 - sites with stable IDs, topology roles, parent allocation ranges, hub assignments, and WAN intent
 - VLANs with stable IDs, numeric VLAN IDs, roles, subnets, editable gateways, capacity, DHCP state, explicit pools, reservations, and notes
-- links with endpoints, connection type, routing mode, advertised prefixes, default-route intent, breakout, and inspection intent
+- links with stable IDs, endpoints, connection type, routing mode, advertised prefixes, default-route intent, and implementation notes
 - trust-zone policies with constrained source, destination, action, and rationale fields
 
 Every entry path uses shared factories and validators. Manual forms, recommendations, JSON migration, and CSV import therefore produce the same normalized structures.

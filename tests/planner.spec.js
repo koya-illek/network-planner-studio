@@ -52,7 +52,7 @@ test("editing a connection keeps its stable ID", async ({ page }) => {
   await page.locator("[data-edit-link]").click();
   await page.locator("#connect-form select[name=resilience]").selectOption("single");
   await page.locator("#connect-form button[type=submit]").click();
-  await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem("network-planner-studio.v1")).links[0].id)).toBe(originalId);
+  await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem("network-planner-studio.v1")).links[0])).toMatchObject({id:originalId,notes:"Primary branch path."});
 });
 
 test("a failed VLAN edit cannot turn into an accidental site move", async ({ page }) => {
@@ -183,6 +183,29 @@ test("reports no CSP console errors during a sample load", async ({ page }) => {
 test("has no automated accessibility violations in the planner", async ({ page }) => {
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations).toEqual([]);
+});
+
+test("has no automated accessibility violations in planner dialogs", async ({ page }) => {
+  const checks = [
+    ["#add-site-top", "#site-dialog"],
+    [".add-vlan-mini", "#vlan-dialog"],
+    ['[data-tool="connect"]', "#connect-dialog"],
+    ["#project-name-button", "#name-dialog"],
+    ["#recommend-button", "#recommend-dialog"],
+    ["#hub-spoke-button", "#hub-dialog"],
+    ['[data-tool="trace"]', "#trace-dialog"],
+  ];
+  for (const [opener, dialog] of checks) {
+    await page.locator(opener).first().click();
+    await expect(page.locator(dialog)).toBeVisible();
+    const results = await new AxeBuilder({ page }).include(dialog).analyze();
+    expect(results.violations, dialog).toEqual([]);
+    await page.locator(`${dialog} [data-close-dialog]`).first().click();
+  }
+  await page.locator("#utility-menu > summary").click();
+  await page.locator("#projects-button").click();
+  const projectResults = await new AxeBuilder({ page }).include("#projects-dialog").analyze();
+  expect(projectResults.violations, "#projects-dialog").toEqual([]);
 });
 
 test("surfaces a storage quota failure with a recovery prompt", async ({ page }) => {
