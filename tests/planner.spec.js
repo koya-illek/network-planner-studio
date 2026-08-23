@@ -554,3 +554,24 @@ test("flushes a pending debounced save when the tab is backgrounded", async ({ p
   await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("network-planner-studio.v1")).name)).toBe("Background flush test");
 });
+
+test("canvas nodes and links announce health and resilience in words", async ({ page }) => {
+  await expect(page.locator(".topology-node .health-flag.warning").first()).toHaveText("Risks");
+  const flagged = await page.locator('.topology-node[aria-label*="risks to review"]').count();
+  expect(flagged).toBeGreaterThan(0);
+  const dualLabel = await page.locator(".link-hit").first().getAttribute("aria-label");
+  expect(dualLabel).toMatch(/redundant paths/);
+  expect(dualLabel).toMatch(/vpn/);
+});
+
+test("trace progress is a live region", async ({ page }) => {
+  await expect(page.locator("#trace-detail")).toHaveAttribute("aria-live", "polite");
+});
+
+test("escape clears the inspector selection", async ({ page }) => {
+  await page.locator(".vlan-row").first().click();
+  await expect(page.locator("#inspector")).not.toContainText("Select something");
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#inspector")).toContainText("Select something");
+  await expect.poll(() => page.evaluate(() => document.activeElement.id)).toBe("inspector");
+});

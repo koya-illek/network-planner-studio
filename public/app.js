@@ -220,16 +220,18 @@ function renderCanvas(){
     const a=state.sites.find(s=>s.id===link.from),b=state.sites.find(s=>s.id===link.to);if(!a||!b)continue;
     const ap=point(a),bp=point(b),x1=ap.x,y1=ap.y,x2=bp.x,y2=bp.y;
     const path=`M ${x1} ${y1} C ${(x1+x2)/2} ${y1}, ${(x1+x2)/2} ${y2}, ${x2} ${y2}`;
-    svg.insertAdjacentHTML("beforeend",`<path id="route-${link.id}" d="${path}" class="link ${link.resilience==="dual"?"dual":""}"/><path d="${path}" class="link-hit" data-link="${link.id}" tabindex="0" role="button" aria-label="${escapeHtml(`${a.name} to ${b.name} connection`)}"/><text class="link-label" x="${(x1+x2)/2}" y="${(y1+y2)/2-7}" text-anchor="middle">${linkLabel(link)}</text>`);
+    svg.insertAdjacentHTML("beforeend",`<path id="route-${link.id}" d="${path}" class="link ${link.resilience==="dual"?"dual":""}"/><path d="${path}" class="link-hit" data-link="${link.id}" tabindex="0" role="button" aria-label="${escapeHtml(`${a.name} to ${b.name}: ${linkLabel(link).toLowerCase()}, ${link.resilience==="dual"?"redundant paths":"single path"}`)}"/><text class="link-label" x="${(x1+x2)/2}" y="${(y1+y2)/2-7}" text-anchor="middle">${linkLabel(link)}</text>`);
   }
   for(const site of state.sites){
-    const node=document.createElement("div"),position=point(site);node.className=`topology-node role-${site.topologyRole||"standalone"} ${selected?.type==="site"&&selected.id===site.id?"selected":""}`;node.dataset.site=site.id;node.tabIndex=0;node.setAttribute("role","button");node.setAttribute("aria-label",`${site.name}, ${site.topologyRole||"standalone"} site, ${site.cidr}`);
+    const node=document.createElement("div"),position=point(site),health=siteHealth(site);node.className=`topology-node role-${site.topologyRole||"standalone"} ${selected?.type==="site"&&selected.id===site.id?"selected":""}`;node.dataset.site=site.id;node.tabIndex=0;node.setAttribute("role","button");node.setAttribute("aria-label",`${site.name}, ${site.topologyRole||"standalone"} site, ${site.cidr}${health?`, ${healthWord(health)}`:""}`);
     node.style.left=`${position.left}px`;node.style.top=`${position.top}px`;node.style.width=`${nodeWidth}px`;
-    const health=siteHealth(site);
-    node.innerHTML=`<div class="node-head"><span class="node-icon">${site.topologyRole==="hub"?"HUB":TYPE_ICONS[site.type]||"ST"}</span><span class="node-copy"><strong>${escapeHtml(site.name)}</strong><small>${escapeHtml(site.cidr)} · ${escapeHtml(site.topologyRole||"standalone")}</small></span></div><div class="node-foot"><span><i class="health-dot ${health}"></i>${site.vlans.length} VLAN${site.vlans.length===1?"":"s"}</span><span>${site.devices} devices</span></div>`;
+    node.innerHTML=`<div class="node-head"><span class="node-icon">${site.topologyRole==="hub"?"HUB":TYPE_ICONS[site.type]||"ST"}</span><span class="node-copy"><strong>${escapeHtml(site.name)}</strong><small>${escapeHtml(site.cidr)} · ${escapeHtml(site.topologyRole||"standalone")}</small></span></div><div class="node-foot"><span><i class="health-dot ${health}"></i>${health?`<span class="health-flag ${health}">${health==="error"?"Errors":"Risks"}</span>`:""}${site.vlans.length} VLAN${site.vlans.length===1?"":"s"}</span><span>${site.devices} devices</span></div>`;
     layer.append(node);
   }
 }
+// Health must not be a colour-only signal: the flag word reaches sighted
+// readers who cannot distinguish the dot, and the aria-label reaches the rest.
+function healthWord(health){return health==="error"?"blocking issues":health==="warning"?"risks to review":""}
 function linkLabel(link){return link.type==="vpn"?"VPN":link.type==="private"?"PRIVATE WAN":link.type==="peering"?"PEERING":"INTERNET"}
 function siteHealth(site){const issues=reviewDesign().filter(i=>i.siteId===site.id);return issues.some(i=>i.severity==="error")?"error":issues.some(i=>i.severity==="warning")?"warning":""}
 
@@ -309,7 +311,18 @@ function reviewDesign(){
     if(s.vlans.some(v=>v.role==="guest")&&s.vlans.some(v=>v.role==="users"))issues.push(issue("info","Trust boundary required",`${s.name}'s guest network should be denied access to private staff and infrastructure ranges.`,s.id));
   }
   if(state.sites.length>1){
-    const visited=new Set(),walk=id=>{visited.add(id);state.links.filter(l=>l.from===id||l.to===id).forEach(l=>{const n=l.from===id?l.to:l.from;if(!visited.has(n))walk(n)})};walk(state.sites[0].id);
+    // Iterative flood fill: a deep imported chain must not be able to exhaust
+    // the stack through recursive closure.
+    const visited=new Set(),stack=[state.sites[0].id];
+    while(stack.length){
+      const id=stack.pop();
+      if(visited.has(id))continue;
+      visited.add(id);
+      for(const l of state.links){
+        if(l.from===id)stack.push(l.to);
+        else if(l.to===id)stack.push(l.from);
+      }
+    }
     state.sites.filter(s=>!visited.has(s.id)).forEach(s=>issues.push(issue("warning","Isolated site",`${s.name} is not connected to the rest of the topology.`,s.id)));
   }
   for(const link of state.links){
@@ -639,7 +652,12 @@ document.addEventListener("click",e=>{
   if(e.target.closest("#rerun-review")){reviewCache=null;renderReview();showToast("Design review updated")}
 });
 document.addEventListener("keydown",e=>{
-  if(e.key==="Escape"){const menu=$("#utility-menu");if(menu?.open){menu.open=false;menu.querySelector("summary").focus()}}
+  if(e.key==="Escape"){
+    const menu=$("#utility-menu");
+    if(menu?.open){menu.open=false;menu.querySelector("summary").focus();return}
+    // Escape is the keyboard counterpart of the inspector close button.
+    if(!$("dialog[open]")&&selected){selected=null;render();$("#inspector").focus()}
+  }
   const node=e.target.closest?.(".topology-node"),row=e.target.closest?.(".site-row,.vlan-row"),hit=e.target.closest?.(".link-hit");
   if(node&&e.target===node&&["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(e.key)){
     e.preventDefault();const site=state.sites.find(s=>s.id===node.dataset.site);if(!site)return;

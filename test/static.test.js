@@ -137,6 +137,17 @@ test("quarantines unreadable stored state instead of overwriting it", async () =
   assert.match(app, /could not be read\. The raw copy was kept under/, "the recovery message must tell the user where the copy lives");
 });
 
+test("canvas health, link resilience and escape selection are wired", async () => {
+  const app = await readFile(new URL("public/app.js", root), "utf8");
+  const html = await readFile(new URL("public/index.html", root), "utf8");
+  assert.match(app, /class="health-flag \$\{health\}"/, "node health must carry a text flag, not a colour-only dot");
+  assert.match(app, /function healthWord\(health\)\{return health==="error"\?"blocking issues":health==="warning"\?"risks to review":""\}/);
+  assert.match(app, /redundant paths":"single path/, "link labels must announce resilience in words");
+  assert.match(html, /id="trace-detail" aria-live="polite"/, "trace progress must be announced");
+  assert.doesNotMatch(app, /walk=id=>/, "connectivity must not recurse per site");
+  assert.match(app, /Escape is the keyboard counterpart of the inspector close button/);
+});
+
 test("iteration-7 keeps stored gateways and surfaces cross-tab conflicts", async () => {
   const app = await readFile(new URL("public/app.js", root), "utf8");
   const html = await readFile(new URL("public/index.html", root), "utf8");
