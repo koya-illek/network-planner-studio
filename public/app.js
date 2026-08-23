@@ -1,4 +1,4 @@
-import {SCHEMA_ID,SCHEMA_VERSION,ENUMS,ipToInt,parseCidr,parseRoutePrefix,rangesOverlap,contains,firstUsable,endpointCapacity,defaultDhcpPool,validHostInSubnet,validateGateway,validateDhcpPool,prefixForDevices,nextSubnet,suggestSiteRange as suggestSiteRangeCore,isPrivateCidr,isPrivateRoutePrefix,guardCsvCell,unguardCsvCell,shortestPath,migrateDesign,createSite,createVlan,createLink,validateDesign} from "./network-core.js";
+import {SCHEMA_ID,SCHEMA_VERSION,ENUMS,parseCidr,parseRoutePrefix,rangesOverlap,contains,firstUsable,endpointCapacity,defaultDhcpPool,validateGateway,validateDhcpPool,prefixForDevices,nextSubnet,suggestSiteRange as suggestSiteRangeCore,isPrivateCidr,isPrivateRoutePrefix,guardCsvCell,unguardCsvCell,shortestPath,migrateDesign,createSite,createVlan,createLink} from "./network-core.js";
 
 const STORAGE_KEY = "network-planner-studio.v1";
 const LIBRARY_KEY = "network-planner-studio.projects.v1";
@@ -69,8 +69,8 @@ function sampleState() {
 
 function vlan(name,vid,role,devices,cidr){const pool=defaultDhcpPool(cidr,1);return createVlan({id:uid(),name,vid,role,devices,cidr,gateway:firstUsable(cidr),dhcpEnabled:role!=="servers",reserved:1,dhcpStart:pool.start,dhcpEnd:pool.end,notes:"",siteCidr:"10.0.0.0/8"})}
 
-function suggestSiteRange(devices=50,growth=30){
-  return suggestSiteRangeCore(state.sites.map(s=>s.cidr).filter(Boolean),devices,growth);
+function suggestSiteRange(devices=50){
+  return suggestSiteRangeCore(state.sites.map(s=>s.cidr).filter(Boolean),devices);
 }
 function loadState(){try{const value=JSON.parse(storageGet(STORAGE_KEY));return value?migrateDesign(value,{strict:false}):null}catch(error){storageIssue="The saved design could not be read. Start a new design or import a recovery copy.";return null}}
 function loadLibrary(){try{const value=JSON.parse(storageGet(LIBRARY_KEY));return value&&typeof value==="object"?value:{}}catch{storageIssue="The local project library could not be read. Export current work before continuing.";return{}}}
@@ -430,7 +430,7 @@ function buildRecommendation(){
   try{
     if(kind==="site"){
       const name=String(fd.get("siteName")||"").trim()||"New site",type=fd.get("siteType"),devices=Math.max(1,+fd.get("siteDevices")),growth=+fd.get("siteGrowth");
-      const cidr=suggestSiteRange(devices,growth),shell={vlans:[]},vlans=[],occupied=[];
+      const cidr=suggestSiteRange(devices),shell={vlans:[]},vlans=[],occupied=[];
       for(const role of siteRoles(type)){
         const count=roleDevices(role,devices),prefix=prefixForDevices(count,growth),subnet=nextSubnet(cidr,prefix,occupied),vid=conventionalVid(role,shell);
         const pool=defaultDhcpPool(subnet,1),proposed=createVlan({id:uid(),name:ROLE_DEFAULTS[role].name,vid,role,devices:count,cidr:subnet,gateway:firstUsable(subnet),dhcpEnabled:!["servers","management"].includes(role),reserved:1,dhcpStart:pool.start,dhcpEnd:pool.end,notes:"Recommended for the new site.",siteCidr:cidr});
@@ -535,7 +535,7 @@ function animateRoute(fromId,toId){
 }
 
 $("#site-form").addEventListener("submit",e=>{
-  e.preventDefault();const fd=new FormData(e.currentTarget),name=fd.get("name").trim(),devices=+fd.get("devices"),growth=+fd.get("growth");let cidr=fd.get("cidr").trim()||suggestSiteRange(devices,growth);
+  e.preventDefault();const fd=new FormData(e.currentTarget),name=fd.get("name").trim(),devices=+fd.get("devices"),growth=+fd.get("growth");let cidr=fd.get("cidr").trim()||suggestSiteRange(devices);
   try{cidr=parseCidr(cidr,{allow31:false}).cidr;if(state.sites.some(s=>s.id!==editingSiteId&&rangesOverlap(cidr,s.cidr)))throw new Error("This site range overlaps an existing site allocation");
     pushHistory();
     if(editingSiteId){const site=state.sites.find(s=>s.id===editingSiteId),canonical=createSite({...site,name,type:fd.get("type"),devices,cidr,wan:fd.get("wan"),growth,topologyRole:fd.get("topologyRole"),internetBreakout:fd.get("internetBreakout"),notes:fd.get("notes").trim()});Object.assign(site,canonical,{id:site.id,hubId:site.hubId,x:site.x,y:site.y});selected={type:"site",id:site.id};showToast("Site updated")}

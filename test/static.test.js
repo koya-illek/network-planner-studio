@@ -119,3 +119,15 @@ test("iteration-6 flushes pending saves on pagehide", async () => {
   const app = await readFile(new URL("public/app.js", root), "utf8");
   assert.match(app, /window\.addEventListener\("pagehide",\(\)=>\{if\(touch\.timer\)\{clearTimeout\(touch\.timer\);touch\.timer=null;saveState\(\)\}\}\)/, "the debounce window must not swallow the last edit on tab close");
 });
+
+test("iteration-7 keeps stored gateways and surfaces cross-tab conflicts", async () => {
+  const app = await readFile(new URL("public/app.js", root), "utf8");
+  const html = await readFile(new URL("public/index.html", root), "utf8");
+  assert.match(app, /previousGateway&&validateGateway\(previousGateway,cidr/, "a VLAN edit must keep a stored gateway that is still valid for the subnet");
+  assert.ok(app.includes('window.addEventListener("storage"') && app.includes("e.key!==STORAGE_KEY"), "cross-tab writes to the current design must raise a warning");
+  assert.match(html, /id="canvas" class="canvas" role="region"/, "the focusable canvas must expose its label through a region role");
+  for (const dead of ["ipToInt", "validHostInSubnet", "validateDesign"]) {
+    const occurrences = (app.match(new RegExp(`\\b${dead}\\b`, "g")) ?? []).length;
+    assert.ok(occurrences === 0, `${dead} is no longer imported by app.js`);
+  }
+});
