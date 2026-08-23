@@ -124,22 +124,31 @@ function showHome(){
   window.scrollTo({top:0,behavior:"smooth"});
 }
 
-const FOCUS_IDENTITY=[[ "vlan-row","data-vlan"],["site-row-select","data-site"],["topology-node","data-site"],["link-hit","data-link"]];
+const FOCUS_IDENTITY=[["vlan-row","data-vlan"],["site-row-select","data-site"],["topology-node","data-site"],["link-hit","data-link"],["add-vlan-mini","data-add-vlan"]];
+const FOCUS_INSPECTOR_ATTRS=["data-edit-site","data-edit-vlan","data-edit-link","data-inspector-add-vlan","data-recommend-vlan","data-trace-link"];
 function focusKeeper(){
   const el=document.activeElement;
   if(!el||el===document.body)return null;
   for(const [cls,attr] of FOCUS_IDENTITY)if(el.classList.contains(cls)&&el.getAttribute(attr))return `.${cls}[${attr}="${CSS.escape(el.getAttribute(attr))}"]`;
   if(el.dataset.flow)return `[data-flow="${CSS.escape(el.dataset.flow)}"]`;
+  for(const attr of FOCUS_INSPECTOR_ATTRS)if(el.getAttribute(attr))return `#inspector [${attr}="${CSS.escape(el.getAttribute(attr))}"]`;
   return null;
 }
 function restoreFocus(keeper){
   if(!keeper||document.activeElement!==document.body)return;
   const target=$(keeper);
-  target?.focus({preventScroll:true});
-  if(document.activeElement===document.body&&!target?.offsetParent){
-    const opener=target?.closest("#sites-panel")?$("#mobile-sites-button"):null;
-    if(opener&&opener.offsetParent)opener.focus({preventScroll:true});
+  if(target){
+    target.focus({preventScroll:true});
+    if(document.activeElement===document.body&&!target.offsetParent){
+      const opener=target.closest("#sites-panel")?$("#mobile-sites-button"):null;
+      if(opener&&opener.offsetParent)opener.focus({preventScroll:true});
+    }
+    return;
   }
+  // An inspector-origin control whose entity or view is gone (the inspector
+  // moved on, or its row was removed) still needs a landing spot better
+  // than <body>.
+  if(keeper.startsWith("#inspector "))$("#inspector").focus({preventScroll:true});
 }
 function render(){
   const keeper=focusKeeper();

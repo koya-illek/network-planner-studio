@@ -155,6 +155,22 @@ test("skips trace particles under prefers-reduced-motion", async ({ page }) => {
   expect(await page.locator(".route-particle").count()).toBe(0);
 });
 
+test("keeps keyboard focus after dialog-driven edits", async ({ page }) => {
+  await page.locator(".add-vlan-mini").first().focus();
+  await page.keyboard.press("Enter");
+  await page.locator("#vlan-form input[name=name]").fill("Probe net");
+  await page.locator("#vlan-form button[type=submit]").click();
+  await expect.poll(() => page.evaluate(() => document.activeElement.className)).toContain("add-vlan-mini");
+
+  await page.locator(".site-row-select").first().click();
+  const inspectorButton = page.locator("[data-inspector-add-vlan]");
+  await inspectorButton.focus();
+  await page.keyboard.press("Enter");
+  await page.locator("#vlan-form input[name=name]").fill("Probe two");
+  await page.locator("#vlan-form button[type=submit]").click();
+  await expect.poll(() => page.evaluate(() => document.activeElement.id || document.activeElement.className)).toBe("inspector");
+});
+
 test("relayouts the canvas after edits made from other tabs", async ({ page }) => {
   const nodeBox = () => page.evaluate(() => {
     const canvas = document.querySelector("#canvas").getBoundingClientRect();
