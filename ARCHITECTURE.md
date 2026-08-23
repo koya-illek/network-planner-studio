@@ -61,7 +61,7 @@ The root schema identifier is `network-planner-studio/design`, version 3. The de
 
 - project metadata, assumptions, unresolved decisions, and release/schema provenance
 - sites with stable IDs, topology roles, parent allocation ranges, hub assignments, and WAN intent
-- VLANs with stable IDs, numeric VLAN IDs, roles, subnets, gateways, capacity, DHCP state, explicit pools, reservations, and notes
+- VLANs with stable IDs, numeric VLAN IDs, roles, subnets, editable gateways, capacity, DHCP state, explicit pools, reservations, and notes
 - links with endpoints, connection type, routing mode, advertised prefixes, default-route intent, breakout, and inspection intent
 - trust-zone policies with constrained source, destination, action, and rationale fields
 
@@ -85,8 +85,10 @@ Every entry path uses shared factories and validators. Manual forms, recommendat
 - Route intent accepts `/0` through `/32`.
 - `/31` is supported for point-to-point transit.
 - Network and broadcast addresses, gateways, reservations, and explicit pools are validated by subnet type.
-- Editing a VLAN keeps its stored gateway whenever it remains a usable host for the subnet and role; otherwise the planner falls back to the first usable address.
+- The VLAN form accepts a custom usable gateway and defaults to the first usable address when the field is blank.
+- A reservation count covers the first usable addresses. A gateway outside that low-address block reduces endpoint capacity separately, and an automatic DHCP pool chooses the larger contiguous range that excludes it.
 - Duplicate IDs and duplicate VLAN IDs inside one site are rejected.
+- Editing a VLAN or link preserves its stable object ID. Automatic VLAN-ID selection searches the full valid range and reports exhaustion instead of returning an occupied ID.
 - Existing address space is preserved unless the user deliberately changes it.
 
 ## Third-party services and dependencies

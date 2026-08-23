@@ -30,6 +30,7 @@ test("hub policy can deny spoke-to-spoke routing", async ({ page }) => {
 });
 
 test("editing a VLAN can be undone and redone", async ({ page }) => {
+  const originalId=await page.locator(".vlan-row").first().getAttribute("data-vlan");
   await page.locator(".vlan-row").first().click();
   await page.locator("[data-edit-vlan]").click();
   await page.locator("#vlan-form input[name=devices]").fill("110");
@@ -41,6 +42,50 @@ test("editing a VLAN can be undone and redone", async ({ page }) => {
   await page.locator("#redo-button").click();
   const stored=await page.evaluate(()=>JSON.parse(localStorage.getItem("network-planner-studio.v1")));
   expect(stored.sites[0].vlans[0].devices).toBe(110);
+  expect(stored.sites[0].vlans[0].id).toBe(originalId);
+});
+
+test("editing a connection keeps its stable ID", async ({ page }) => {
+  const originalId=await page.locator(".link-hit").first().getAttribute("data-link");
+  await page.locator(".link-hit").first().focus();
+  await page.keyboard.press("Enter");
+  await page.locator("[data-edit-link]").click();
+  await page.locator("#connect-form select[name=resilience]").selectOption("single");
+  await page.locator("#connect-form button[type=submit]").click();
+  await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem("network-planner-studio.v1")).links[0].id)).toBe(originalId);
+});
+
+test("a failed VLAN edit cannot turn into an accidental site move", async ({ page }) => {
+  await page.locator(".vlan-row").first().click();
+  await page.locator("[data-edit-vlan]").click();
+  await page.locator("#vlan-form input[name=cidr]").fill("10.99.10.0/24");
+  await page.locator("#vlan-form button[type=submit]").click();
+  await expect(page.locator("#vlan-form select[name=siteId]")).toBeDisabled();
+  await expect(page.locator("#vlan-form-error")).toContainText("outside the site's");
+  await page.locator("#vlan-form input[name=cidr]").fill("10.20.10.0/25");
+  await page.locator("#vlan-form button[type=submit]").click();
+  await expect(page.locator("#vlan-dialog")).not.toBeVisible();
+});
+
+test("accepts a custom gateway and excludes it from the default pool", async ({ page }) => {
+  await page.locator(".vlan-row").first().click();
+  await page.locator("[data-edit-vlan]").click();
+  await page.locator("#vlan-form input[name=gateway]").fill("10.20.10.126");
+  await page.locator("#vlan-form input[name=dhcpStart]").fill("");
+  await page.locator("#vlan-form input[name=dhcpEnd]").fill("");
+  await page.locator("#vlan-form button[type=submit]").click();
+  await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem("network-planner-studio.v1")).sites[0].vlans[0])).toMatchObject({gateway:"10.20.10.126",dhcpStart:"10.20.10.2",dhcpEnd:"10.20.10.125"});
+  await expect(page.locator("#inspector")).toContainText("10.20.10.126");
+});
+
+test("finds a free low VLAN ID when a high ID is already occupied", async ({ page }) => {
+  const vids=[10,20,30,40,50,60,70,80,90,99,4094];
+  const vlans=vids.map((vid,index)=>({id:`v${index}`,name:`VLAN ${vid}`,vid,role:"other",devices:1,cidr:`10.70.${index}.0/24`,gateway:`10.70.${index}.1`,dhcpEnabled:true,reserved:1,dhcpStart:`10.70.${index}.2`,dhcpEnd:`10.70.${index}.254`,notes:""}));
+  const design={schema:"network-planner-studio/design",version:3,name:"VLAN fallback",mode:"imported",topologyMode:"custom",policies:{spokeToSpoke:"via-hub",centralizedInspection:false},flowPolicies:{},assumptions:[],sites:[{id:"site",name:"HQ",type:"office",cidr:"10.70.0.0/16",devices:1,wan:"single",growth:30,x:20,y:20,topologyRole:"standalone",hubId:null,internetBreakout:"local",vlans}],links:[]};
+  await page.locator("#file-input").setInputFiles({name:"vlan-fallback.json",mimeType:"application/json",buffer:Buffer.from(JSON.stringify(design))});
+  await page.locator("#add-site-side").waitFor();
+  await page.locator(".add-vlan-mini").click();
+  await expect(page.locator("#vlan-form input[name=vid]")).toHaveValue("1");
 });
 
 test("recommendations remain compatible with the example", async ({ page }) => {

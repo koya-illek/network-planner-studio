@@ -122,18 +122,33 @@ export function firstUsable(cidr) {
   }
 }
 
-export function endpointCapacity(cidr, reserved = 1) {
+export function endpointCapacity(cidr, reserved = 1, { gateway = "" } = {}) {
   const parsed = parseCidr(cidr);
+  if (parsed.prefix === 31) return 2;
   const count = Math.max(0, Number.isFinite(Number(reserved)) ? Math.trunc(Number(reserved)) : 1);
-  return Math.max(0, parsed.usable - (parsed.prefix === 31 ? 0 : count));
+  const gatewayValue = validHostInSubnet(gateway, cidr) ? ipToInt(gateway) : null;
+  const reservedEnd = parsed.network + count;
+  const gatewayOutsideReservedBlock = gatewayValue !== null && gatewayValue > reservedEnd;
+  return Math.max(0, parsed.usable - count - Number(gatewayOutsideReservedBlock));
 }
 
-export function defaultDhcpPool(cidr, reserved = 1) {
+export function defaultDhcpPool(cidr, reserved = 1, { gateway = "" } = {}) {
   const parsed = parseCidr(cidr);
   if (parsed.prefix === 31) return { start: "", end: "" };
   const count = Math.max(1, Number.isFinite(Number(reserved)) ? Math.trunc(Number(reserved)) : 1);
-  const start = Math.min(parsed.broadcast - 1, parsed.network + 1 + count);
-  return { start: intToIp(start >>> 0), end: intToIp((parsed.broadcast - 1) >>> 0) };
+  let start = Math.min(parsed.broadcast - 1, parsed.network + 1 + count);
+  let end = parsed.broadcast - 1;
+  if (validHostInSubnet(gateway, cidr)) {
+    const gatewayValue = ipToInt(gateway);
+    if (gatewayValue >= start && gatewayValue <= end) {
+      const lowerSize = gatewayValue - start;
+      const upperSize = end - gatewayValue;
+      if (upperSize >= lowerSize) start = gatewayValue + 1;
+      else end = gatewayValue - 1;
+    }
+  }
+  if (start > end) return { start: "", end: "" };
+  return { start: intToIp(start >>> 0), end: intToIp(end >>> 0) };
 }
 
 export function validHostInSubnet(ip, cidr) {
@@ -312,6 +327,15 @@ function finiteBounded(value, fallback, [min, max], integer = false) {
   return integer ? Math.trunc(bounded) : bounded;
 }
 
+function normalizedBoolean(value, fallback, errors, path, { validateTypes = false } = {}) {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value === "boolean") return value;
+  if (validateTypes) errors.push(issue(path, `${path} must be a boolean`, "invalid-type"));
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return fallback;
+}
+
 function normalizedText(value, fallback, max) {
   return String(value ?? fallback).slice(0, max);
 }
@@ -331,7 +355,7 @@ function canonicalRoutePrefixes(values, errors, path) {
   return [...new Set(result)];
 }
 
-function normalizeVlan(raw = {}, errors = [], path = "vlan", { allowIncomplete = false } = {}) {
+function normalizeVlan(raw = {}, errors = [], path = "vlan", { allowIncomplete = false, validateTypes = false } = {}) {
   const value = raw && typeof raw === "object" ? raw : {};
   const role = String(value.role || "other");
   if (!has(role, ENUMS.vlanRoles)) errors.push(issue(`${path}.role`, `Unknown VLAN role: ${role}`, "invalid-enum"));
@@ -339,8 +363,9 @@ function normalizeVlan(raw = {}, errors = [], path = "vlan", { allowIncomplete =
   if (!cidr && !allowIncomplete) errors.push(issue(`${path}.cidr`, "VLAN subnet is required", "invalid-cidr"));
   else if (cidr && (() => { try { parseCidr(cidr); return false; } catch { return true; } })()) errors.push(issue(`${path}.cidr`, "VLAN subnet must be an aligned allocation CIDR from /8 through /31", "invalid-cidr"));
   const reserved = finiteBounded(value.reserved, 1, LIMITS.reserved, true);
+  const gateway = normalizedText(value.gateway, firstUsable(cidr), 64);
   let pool = { start: "", end: "" };
-  try { pool = defaultDhcpPool(cidr, reserved); } catch { /* validation below reports the CIDR */ }
+  try { pool = defaultDhcpPool(cidr, reserved, { gateway }); } catch { /* validation below reports the CIDR */ }
   return {
     id: safeIdentifier(value.id),
     name: normalizedText(value.name, "Network", 100),
@@ -348,11 +373,11 @@ function normalizeVlan(raw = {}, errors = [], path = "vlan", { allowIncomplete =
     role: has(role, ENUMS.vlanRoles) ? role : "other",
     devices: finiteBounded(value.devices, 1, LIMITS.vlanDevices, true),
     cidr,
-    gateway: normalizedText(value.gateway, firstUsable(cidr), 64),
-    dhcpEnabled: value.dhcpEnabled !== false,
+    gateway,
+    dhcpEnabled: normalizedBoolean(value.dhcpEnabled, true, errors, `${path}.dhcpEnabled`, { validateTypes }),
     reserved,
-    dhcpStart: value.dhcpEnabled === false ? "" : normalizedText(value.dhcpStart || pool.start, "", 64),
-    dhcpEnd: value.dhcpEnabled === false ? "" : normalizedText(value.dhcpEnd || pool.end, "", 64),
+    dhcpStart: normalizedBoolean(value.dhcpEnabled, true) ? normalizedText(value.dhcpStart || pool.start, "", 64) : "",
+    dhcpEnd: normalizedBoolean(value.dhcpEnabled, true) ? normalizedText(value.dhcpEnd || pool.end, "", 64) : "",
     notes: normalizedText(value.notes, "", 2000)
   };
 }
@@ -385,7 +410,7 @@ function normalizeSite(raw = {}, errors = [], path = "site", options = {}) {
   };
 }
 
-function normalizeLink(raw = {}, errors = [], path = "link") {
+function normalizeLink(raw = {}, errors = [], path = "link", { validateTypes = false } = {}) {
   const value = raw && typeof raw === "object" ? raw : {};
   const type = String(value.type || "vpn"), resilience = String(value.resilience || "single"), routingType = String(value.routingType || "static");
   if (!has(type, ENUMS.linkTypes)) errors.push(issue(`${path}.type`, `Unknown connection type: ${type}`, "invalid-enum"));
@@ -398,8 +423,8 @@ function normalizeLink(raw = {}, errors = [], path = "link") {
     type: has(type, ENUMS.linkTypes) ? type : "vpn",
     resilience: has(resilience, ENUMS.resilience) ? resilience : "single",
     routingType: has(routingType, ENUMS.routingTypes) ? routingType : "static",
-    transitAllowed: value.transitAllowed !== false,
-    defaultRoute: Boolean(value.defaultRoute),
+    transitAllowed: normalizedBoolean(value.transitAllowed, true, errors, `${path}.transitAllowed`, { validateTypes }),
+    defaultRoute: normalizedBoolean(value.defaultRoute, false, errors, `${path}.defaultRoute`, { validateTypes }),
     advertisedPrefixes: canonicalRoutePrefixes(value.advertisedPrefixes, errors, `${path}.advertisedPrefixes`),
     notes: normalizedText(value.notes, "", 2000)
   };
@@ -542,7 +567,7 @@ export function migrateDesign(input, { strict = true } = {}) {
     const rawId = String(raw?.id || "");
     if (rawSiteIds.has(rawId) && rawId) errors.push(issue(`sites[${index}].id`, `Duplicate site ID: ${rawId}`, "duplicate-id"));
     rawSiteIds.add(rawId);
-    const normalized = normalizeSite(raw, errors, `sites[${index}]`, { allowIncomplete: legacyIncomplete });
+    const normalized = normalizeSite(raw, errors, `sites[${index}]`, { allowIncomplete: legacyIncomplete, validateTypes: inputVersion >= SCHEMA_VERSION });
     idMap.set(rawId, normalized.id);
     sites.push(normalized);
   });
@@ -555,7 +580,7 @@ export function migrateDesign(input, { strict = true } = {}) {
     const rawId = String(raw?.id || "");
     if (rawLinkIds.has(rawId) && rawId) errors.push(issue(`links[${index}].id`, `Duplicate link ID: ${rawId}`, "duplicate-id"));
     rawLinkIds.add(rawId);
-    const normalized = normalizeLink({ ...raw, from: idMap.get(String(raw?.from || "")) || raw?.from, to: idMap.get(String(raw?.to || "")) || raw?.to }, errors, `links[${index}]`);
+    const normalized = normalizeLink({ ...raw, from: idMap.get(String(raw?.from || "")) || raw?.from, to: idMap.get(String(raw?.to || "")) || raw?.to }, errors, `links[${index}]`, { validateTypes: inputVersion >= SCHEMA_VERSION });
     if (siteIds.has(normalized.from) && siteIds.has(normalized.to) && normalized.from !== normalized.to) links.push(normalized);
     else if (!legacyIncomplete) errors.push(issue(`links[${index}]`, "Connection endpoints must reference two different existing sites", "dangling-link"));
   });
@@ -575,7 +600,7 @@ export function migrateDesign(input, { strict = true } = {}) {
     name: normalizedText(input.name, "Imported network", 80),
     mode,
     topologyMode: has(topologyMode, ENUMS.topologyModes) ? topologyMode : "custom",
-    policies: { spokeToSpoke: has(spokeToSpoke, ENUMS.spokePolicies) ? spokeToSpoke : "via-hub", centralizedInspection: policies.centralizedInspection === true, secondaryHubId },
+    policies: { spokeToSpoke: has(spokeToSpoke, ENUMS.spokePolicies) ? spokeToSpoke : "via-hub", centralizedInspection: normalizedBoolean(policies.centralizedInspection, false, errors, "policies.centralizedInspection", { validateTypes: inputVersion >= SCHEMA_VERSION }), secondaryHubId },
     flowPolicies: normalizeFlowPolicies(input.flowPolicies, errors),
     assumptions: Array.isArray(input.assumptions) ? input.assumptions.slice(0, 200).map(value => normalizedText(value, "", 2000)).filter(Boolean) : [],
     sites,

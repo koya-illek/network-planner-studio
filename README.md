@@ -27,7 +27,7 @@ data flow, privacy boundary, deployment topology, and external dependencies.
 - Static or BGP routing intent, advertised prefixes and default routes
 - Address overlap, containment and capacity validation
 - Single-WAN, segmentation and management-network design guidance
-- Gateway-aware capacity, DHCP reservations and `/31` transit networks
+- Editable gateways, gateway-aware capacity, DHCP reservations and `/31` transit networks
 - Explicit DHCP pool start/end planning with gateway exclusion checks
 - Editable sites, VLANs and connections with undo/redo
 - Trust-zone traffic policy matrix

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   parseCidr,rangesOverlap,contains,endpointCapacity,prefixForDevices,nextSubnet,
-  suggestSiteRange,isPrivateCidr,isPrivateRoutePrefix,shortestPath,migrateDesign,defaultDhcpPool,validHostInSubnet,parseRoutePrefix,validateGateway,validateDhcpPool,validateDesign,guardCsvCell,unguardCsvCell,intToIp,SCHEMA_ID,SCHEMA_VERSION
+  suggestSiteRange,isPrivateCidr,isPrivateRoutePrefix,shortestPath,migrateDesign,defaultDhcpPool,validHostInSubnet,parseRoutePrefix,validateGateway,validateDhcpPool,validateDesign,guardCsvCell,unguardCsvCell,intToIp,firstUsable,SCHEMA_ID,SCHEMA_VERSION
 } from "../public/network-core.js";
 
 test("parses LAN and point-to-point IPv4 networks",()=>{
@@ -21,6 +21,7 @@ test("detects overlap and containment at boundaries",()=>{
 
 test("capacity reserves the gateway and supports /31 transit",()=>{
   assert.equal(endpointCapacity("10.0.0.0/24"),253);
+  assert.equal(endpointCapacity("10.0.0.0/24",1,{gateway:"10.0.0.254"}),252);
   assert.equal(endpointCapacity("10.0.0.0/31"),2);
   assert.equal(prefixForDevices(2,0,0,{transit:true}),31);
   assert.equal(prefixForDevices(60,0,1),26);
@@ -28,6 +29,9 @@ test("capacity reserves the gateway and supports /31 transit",()=>{
 
 test("builds a DHCP pool that excludes reserved addresses and the gateway",()=>{
   assert.deepEqual(defaultDhcpPool("10.0.10.0/24",5),{start:"10.0.10.6",end:"10.0.10.254"});
+  assert.deepEqual(defaultDhcpPool("10.0.10.0/24",1,{gateway:"10.0.10.254"}),{start:"10.0.10.2",end:"10.0.10.253"});
+  assert.deepEqual(defaultDhcpPool("10.0.10.0/24",1,{gateway:"10.0.10.100"}),{start:"10.0.10.101",end:"10.0.10.254"});
+  assert.deepEqual(defaultDhcpPool("10.0.10.0/30",1,{gateway:"10.0.10.2"}),{start:"",end:""});
   assert.equal(validHostInSubnet("10.0.10.254","10.0.10.0/24"),true);
   assert.equal(validHostInSubnet("10.0.10.255","10.0.10.0/24"),false);
 });
@@ -169,6 +173,18 @@ test("strict migration rejects hostile structural values and validates canonical
   const valid={...input,sites:[{...input.sites[0],vlans:[{...input.sites[0].vlans[0],gateway:"10.40.10.1",dhcpStart:"10.40.10.2",dhcpEnd:"10.40.10.254"}]}]};
   const migrated=migrateDesign(valid);
   assert.equal(migrated.schema,SCHEMA_ID);assert.equal(migrated.version,SCHEMA_VERSION);assert.equal(validateDesign(migrated).valid,true);
+});
+
+test("strict v3 migration rejects string booleans instead of changing design intent",()=>{
+  const site=(id,cidr,vlanCidr)=>({id,name:id,type:"office",cidr,devices:1,wan:"single",growth:30,x:20,y:20,topologyRole:"standalone",hubId:null,internetBreakout:"local",vlans:[{id:`${id}-vlan`,name:"Staff",vid:10,role:"users",devices:1,cidr:vlanCidr,gateway:firstUsable(vlanCidr),dhcpEnabled:true,reserved:1,dhcpStart:defaultDhcpPool(vlanCidr).start,dhcpEnd:defaultDhcpPool(vlanCidr).end}]});
+  const input={schema:SCHEMA_ID,version:SCHEMA_VERSION,name:"Boolean probe",mode:"imported",topologyMode:"custom",policies:{spokeToSpoke:"via-hub",centralizedInspection:false},flowPolicies:{},assumptions:[],sites:[site("a","10.1.0.0/16","10.1.1.0/24"),site("b","10.2.0.0/16","10.2.1.0/24")],links:[{id:"link",from:"a",to:"b",type:"vpn",resilience:"single",routingType:"static",transitAllowed:true,defaultRoute:false,advertisedPrefixes:[]}]};
+  assert.throws(()=>migrateDesign({...input,sites:[{...input.sites[0],vlans:[{...input.sites[0].vlans[0],dhcpEnabled:"false"}]},input.sites[1]]}),/must be a boolean/);
+  assert.throws(()=>migrateDesign({...input,links:[{...input.links[0],defaultRoute:"false"}]}),/must be a boolean/);
+  assert.throws(()=>migrateDesign({...input,policies:{...input.policies,centralizedInspection:"true"}}),/must be a boolean/);
+  const recovered=migrateDesign({...input,version:2,sites:[{...input.sites[0],vlans:[{...input.sites[0].vlans[0],dhcpEnabled:"false"}]},input.sites[1]],links:[{...input.links[0],transitAllowed:"false",defaultRoute:"false"}]});
+  assert.equal(recovered.sites[0].vlans[0].dhcpEnabled,false);
+  assert.equal(recovered.links[0].transitAllowed,false);
+  assert.equal(recovered.links[0].defaultRoute,false);
 });
 
 test("allocation and migration remain finite across generated boundary values",()=>{

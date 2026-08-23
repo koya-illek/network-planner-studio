@@ -214,8 +214,9 @@
         <label>Purpose<select name="role"><option value="users">Staff / users</option><option value="voice">Voice</option><option value="guest">Guest Wi-Fi</option><option value="iot">IoT / CCTV</option><option value="servers">Servers</option><option value="management">Network management</option><option value="transit">Transit</option><option value="other">Other</option></select></label>
         <label>Devices needed<input name="devices" type="number" min="1" max="65534" value="30" required></label>
         <label class="wide">Existing IPv4 subnet <span class="optional">(optional)</span><input name="cidr" placeholder="e.g. 10.20.10.0/24"><small>Leave blank to receive the smallest recommended subnet with growth allowance.</small></label>
+        <label class="wide">Gateway <span class="optional">(optional)</span><input name="gateway" placeholder="Automatically uses the first host"><small>Enter another usable host when the network uses a custom gateway.</small></label>
         <label>DHCP<select name="dhcpEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
-        <label>Reserved addresses<input name="reserved" type="number" min="1" max="1000" value="1"><small>Gateway and other reservations, in addition to network and broadcast.</small></label>
+        <label>Low addresses reserved<input name="reserved" type="number" min="1" max="1000" value="1"><small>Reserves the first usable addresses. A gateway outside that block is excluded separately.</small></label>
         <label>DHCP pool start <span class="optional">(optional)</span><input name="dhcpStart" placeholder="Automatically calculated"></label>
         <label>DHCP pool end <span class="optional">(optional)</span><input name="dhcpEnd" placeholder="Automatically calculated"></label>
         <label class="wide">Design notes<textarea name="notes" placeholder="DHCP exclusions, security zone, purpose…"></textarea></label>

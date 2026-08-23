@@ -123,7 +123,8 @@ test("iteration-6 flushes pending saves on pagehide", async () => {
 test("iteration-7 keeps stored gateways and surfaces cross-tab conflicts", async () => {
   const app = await readFile(new URL("public/app.js", root), "utf8");
   const html = await readFile(new URL("public/index.html", root), "utf8");
-  assert.match(app, /previousGateway&&validateGateway\(previousGateway,cidr/, "a VLAN edit must keep a stored gateway that is still valid for the subnet");
+  assert.match(html, /input name="gateway"/, "the VLAN form must expose custom gateways instead of silently replacing them");
+  assert.match(app, /gateway=fd\.get\("gateway"\)\.trim\(\)\|\|firstUsable\(cidr\)/, "a VLAN edit must submit the visible gateway value");
   assert.ok(app.includes('window.addEventListener("storage"') && app.includes("e.key!==STORAGE_KEY"), "cross-tab writes to the current design must raise a warning");
   assert.match(html, /id="canvas" class="canvas" role="region"/, "the focusable canvas must expose its label through a region role");
   for (const dead of ["ipToInt", "validHostInSubnet", "validateDesign"]) {
@@ -150,7 +151,7 @@ test("iteration-8 defers workspace renders behind open modals", async () => {
 
 test("iteration-8 never proposes an occupied VLAN ID", async () => {
   const app = await readFile(new URL("public/app.js", root), "utf8");
-  assert.match(app, /for\(let id=Math\.max\(\.\.\.site\.vlans\.map\(v=>v\.vid\),0\)\+1;id<=4094;id\+\+\)/, "nextVid must scan upward past occupied IDs instead of clamping onto them");
+  assert.match(app, /for\(let id=1;id<=4094;id\+\+\)if\(!site\.vlans\.some\(v=>v\.vid===id\)\)return id;return null/, "nextVid must scan every valid ID and report exhaustion instead of returning an occupied value");
 });
 
 test("iteration-9 keeps interrupted gestures honest", async () => {

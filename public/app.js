@@ -402,8 +402,8 @@ function openVlanDialog(siteId,vlanId=null){
   editingVlanId=vlanId;const form=$("#vlan-form");form.reset();form.elements.siteId.innerHTML=state.sites.map(s=>`<option value="${s.id}">${escapeHtml(s.name)} · ${escapeHtml(s.cidr)}</option>`).join("");if(siteId)form.elements.siteId.value=siteId;
   const found=vlanId&&findVlan(vlanId),site=found?.site||state.sites.find(s=>s.id===form.elements.siteId.value);
   $("#vlan-dialog-title").textContent=found?"Edit VLAN":"Add a VLAN";$("#vlan-submit").textContent=found?"Save changes":"Add VLAN";
-  if(found){form.elements.siteId.value=found.site.id;for(const key of ["name","vid","role","devices","cidr","dhcpStart","dhcpEnd","notes"])form.elements[key].value=found.vlan[key]??"";form.elements.dhcpEnabled.value=String(found.vlan.dhcpEnabled!==false);form.elements.reserved.value=found.vlan.reserved??1}
-  else{form.elements.vid.value=nextVid(site);form.elements.devices.value=30;form.elements.reserved.value=1}
+  if(found){form.elements.siteId.value=found.site.id;for(const key of ["name","vid","role","devices","cidr","gateway","dhcpStart","dhcpEnd","notes"])form.elements[key].value=found.vlan[key]??"";form.elements.dhcpEnabled.value=String(found.vlan.dhcpEnabled!==false);form.elements.reserved.value=found.vlan.reserved??1}
+  else{const vid=nextVid(site);if(vid===null){editingVlanId=null;return showToast(`${site.name} has no free VLAN IDs`)}form.elements.vid.value=vid;form.elements.devices.value=30;form.elements.reserved.value=1}
   form.elements.siteId.disabled=Boolean(found);$("#vlan-form-error").textContent="";$("#vlan-dialog").showModal();setTimeout(()=>form.elements.name.focus(),50);
 }
 function openConnectDialog(fromId,linkId=null){
@@ -414,7 +414,7 @@ function openConnectDialog(fromId,linkId=null){
   else{if(fromId)form.elements.from.value=fromId;form.elements.to.value=state.sites.find(s=>s.id!==form.elements.from.value)?.id||""}
   $("#connect-form-error").textContent="";$("#connect-dialog").showModal();
 }
-function nextVid(site){if(!site)return 10;for(const id of [10,20,30,40,50,60,70,80,90,99])if(!site.vlans.some(v=>v.vid===id))return id;for(let id=Math.max(...site.vlans.map(v=>v.vid),0)+1;id<=4094;id++)if(!site.vlans.some(v=>v.vid===id))return id;return 4094}
+function nextVid(site){if(!site)return 10;for(const id of [10,20,30,40,50,60,70,80,90,99])if(!site.vlans.some(v=>v.vid===id))return id;for(let id=1;id<=4094;id++)if(!site.vlans.some(v=>v.vid===id))return id;return null}
 
 const ROLE_DEFAULTS={
   users:{name:"Staff",vid:10},voice:{name:"Voice",vid:20},guest:{name:"Guest",vid:30},
@@ -448,7 +448,7 @@ function buildRecommendation(){
       const name=String(fd.get("siteName")||"").trim()||"New site",type=fd.get("siteType"),devices=Math.max(1,+fd.get("siteDevices")),growth=+fd.get("siteGrowth");
       const cidr=suggestSiteRange(devices),shell={vlans:[]},vlans=[],occupied=[];
       for(const role of siteRoles(type)){
-        const count=roleDevices(role,devices),prefix=prefixForDevices(count,growth),subnet=nextSubnet(cidr,prefix,occupied),vid=conventionalVid(role,shell);
+        const count=roleDevices(role,devices),prefix=prefixForDevices(count,growth),subnet=nextSubnet(cidr,prefix,occupied),vid=conventionalVid(role,shell);if(vid===null)throw new Error("This site has no free VLAN IDs");
         const pool=defaultDhcpPool(subnet,1),proposed=createVlan({id:uid(),name:ROLE_DEFAULTS[role].name,vid,role,devices:count,cidr:subnet,gateway:firstUsable(subnet),dhcpEnabled:!["servers","management"].includes(role),reserved:1,dhcpStart:pool.start,dhcpEnd:pool.end,notes:"Recommended for the new site.",siteCidr:cidr});
         shell.vlans.push(proposed);vlans.push(proposed);occupied.push(subnet);
       }
@@ -456,7 +456,7 @@ function buildRecommendation(){
       renderRecommendationPreview();
     }else{
       const site=state.sites.find(s=>s.id===fd.get("vlanSite"));if(!site)throw new Error("Add or select a site before requesting a VLAN");
-      const role=fd.get("vlanRole"),devices=Math.max(1,+fd.get("vlanDevices")),vid=conventionalVid(role,site),prefix=prefixForDevices(devices,site.growth),cidr=nextSubnet(site.cidr,prefix,site.vlans.map(v=>v.cidr));
+      const role=fd.get("vlanRole"),devices=Math.max(1,+fd.get("vlanDevices")),vid=conventionalVid(role,site);if(vid===null)throw new Error(`${site.name} has no free VLAN IDs`);const prefix=prefixForDevices(devices,site.growth),cidr=nextSubnet(site.cidr,prefix,site.vlans.map(v=>v.cidr));
       const dhcpEnabled=!(["servers","management"].includes(role)),pool=defaultDhcpPool(cidr,1);
       pendingRecommendation={kind,siteId:site.id,id:uid(),name:String(fd.get("vlanName")||"").trim()||ROLE_DEFAULTS[role].name,role,devices,vid,cidr,gateway:firstUsable(cidr),dhcpEnabled,reserved:1,dhcpStart:dhcpEnabled?pool.start:"",dhcpEnd:dhcpEnabled?pool.end:"",notes:"Recommended by the compatibility assistant."};
       renderRecommendationPreview();
@@ -560,24 +560,20 @@ $("#site-form").addEventListener("submit",e=>{
   }catch(err){$("#site-form-error").textContent=err.message}
 });
 $("#vlan-form").addEventListener("submit",e=>{
-  e.preventDefault();e.currentTarget.elements.siteId.disabled=false;const fd=new FormData(e.currentTarget),site=state.sites.find(s=>s.id===fd.get("siteId"));if(!site)return;
+  e.preventDefault();const existing=editingVlanId&&findVlan(editingVlanId),site=existing?.site||state.sites.find(s=>s.id===e.currentTarget.elements.siteId.value);if(!site)return $("#vlan-form-error").textContent="The selected site no longer exists";const fd=new FormData(e.currentTarget);
   const devices=+fd.get("devices"),vid=+fd.get("vid"),reserved=+fd.get("reserved");let cidr=fd.get("cidr").trim();
   try{
     const role=fd.get("role");if(site.vlans.some(v=>v.id!==editingVlanId&&v.vid===vid))throw new Error(`VLAN ${vid} is already used at ${site.name}`);
     if(!cidr)cidr=nextSubnet(site.cidr,prefixForDevices(devices,site.growth,reserved,{transit:role==="transit"}),site.vlans.filter(v=>v.id!==editingVlanId).map(v=>v.cidr));
     cidr=parseCidr(cidr,{allow31:role==="transit"}).cidr;if(!contains(site.cidr,cidr))throw new Error(`${cidr} is outside the site's ${site.cidr} allocation`);
     if(site.vlans.some(v=>v.id!==editingVlanId&&rangesOverlap(cidr,v.cidr)))throw new Error("This subnet overlaps another VLAN at the site");
-    const dhcpEnabled=fd.get("dhcpEnabled")==="true",automaticPool=defaultDhcpPool(cidr,reserved),dhcpStart=fd.get("dhcpStart").trim()||automaticPool.start,dhcpEnd=fd.get("dhcpEnd").trim()||automaticPool.end;
-    // The form has no gateway field, so an edit must keep the stored gateway
-    // whenever it is still a valid host for the resulting subnet and role.
-    const previousGateway=editingVlanId?findVlan(editingVlanId)?.vlan.gateway:null;
-    const gateway=previousGateway&&validateGateway(previousGateway,cidr,{transit:role==="transit"})?previousGateway:firstUsable(cidr);
+    const dhcpEnabled=fd.get("dhcpEnabled")==="true",gateway=fd.get("gateway").trim()||firstUsable(cidr),automaticPool=defaultDhcpPool(cidr,reserved,{gateway}),dhcpStart=fd.get("dhcpStart").trim()||automaticPool.start,dhcpEnd=fd.get("dhcpEnd").trim()||automaticPool.end;
     if(!validateGateway(gateway,cidr,{transit:role==="transit"}))throw new Error("Gateway must be a usable host inside the VLAN subnet");
     const poolValidation=validateDhcpPool(cidr,gateway,reserved,{enabled:dhcpEnabled,start:dhcpStart,end:dhcpEnd});
     if(!poolValidation.valid)throw new Error(poolValidation.errors[0]);
     pushHistory();
-    const values=createVlan({name:fd.get("name").trim(),vid,role,devices,cidr,gateway,dhcpEnabled,reserved,dhcpStart:dhcpEnabled?dhcpStart:"",dhcpEnd:dhcpEnabled?dhcpEnd:"",notes:fd.get("notes").trim(),siteCidr:site.cidr});
-    let v;if(editingVlanId){v=site.vlans.find(x=>x.id===editingVlanId);Object.assign(v,values);showToast(`${v.name} updated`)}else{v={id:uid(),...values};site.vlans.push(v);showToast(`Added ${v.name} as ${v.cidr}`)}
+    const values=createVlan({id:editingVlanId||uid(),name:fd.get("name").trim(),vid,role,devices,cidr,gateway,dhcpEnabled,reserved,dhcpStart:dhcpEnabled?dhcpStart:"",dhcpEnd:dhcpEnabled?dhcpEnd:"",notes:fd.get("notes").trim(),siteCidr:site.cidr});
+    let v;if(editingVlanId){v=existing.vlan;Object.assign(v,values);showToast(`${v.name} updated`)}else{v=values;site.vlans.push(v);showToast(`Added ${v.name} as ${v.cidr}`)}
     selected={type:"vlan",id:v.id};editingVlanId=null;e.currentTarget.closest("dialog").close();touch();
   }catch(err){$("#vlan-form-error").textContent=err.message}
 });
@@ -586,8 +582,8 @@ $("#connect-form").addEventListener("submit",e=>{
   if(from===to)return $("#connect-form-error").textContent="Choose two different sites";
   if(state.links.some(l=>l.id!==editingLinkId&&((l.from===from&&l.to===to)||(l.from===to&&l.to===from))))return $("#connect-form-error").textContent="These sites are already connected";
   let advertisedPrefixes;try{advertisedPrefixes=String(fd.get("advertisedPrefixes")||"").split(",").map(x=>x.trim()).filter(Boolean).map(x=>parseRoutePrefix(x).cidr)}catch(err){return $("#connect-form-error").textContent=`Advertised prefix: ${err.message}`}
-  pushHistory();const values=createLink({from,to,type:fd.get("type"),resilience:fd.get("resilience"),routingType:fd.get("routingType"),transitAllowed:fd.get("transitAllowed")==="true",defaultRoute:fd.get("defaultRoute")==="on",advertisedPrefixes});
-  let l;if(editingLinkId){l=state.links.find(x=>x.id===editingLinkId);Object.assign(l,values);showToast("Connection updated")}else{l={id:uid(),...values};state.links.push(l);showToast("Connection added")}editingLinkId=null;selected={type:"link",id:l.id};e.currentTarget.closest("dialog").close();touch();
+  pushHistory();const values=createLink({id:editingLinkId||uid(),from,to,type:fd.get("type"),resilience:fd.get("resilience"),routingType:fd.get("routingType"),transitAllowed:fd.get("transitAllowed")==="true",defaultRoute:fd.get("defaultRoute")==="on",advertisedPrefixes});
+  let l;if(editingLinkId){l=state.links.find(x=>x.id===editingLinkId);Object.assign(l,values);showToast("Connection updated")}else{l=values;state.links.push(l);showToast("Connection added")}editingLinkId=null;selected={type:"link",id:l.id};e.currentTarget.closest("dialog").close();touch();
 });
 $("#name-form").addEventListener("submit",e=>{e.preventDefault();pushHistory();const fd=new FormData(e.currentTarget);state.name=fd.get("name").trim();state.assumptions=fd.get("assumptions").split("\n").map(x=>x.trim()).filter(Boolean);$("#name-dialog").close();touch()});
 
@@ -785,7 +781,7 @@ window.addEventListener("storage",e=>{
 
 function findVlan(id){for(const site of state.sites){const vlan=site.vlans.find(v=>v.id===id);if(vlan)return{site,vlan}}return null}
 function safeParse(cidr){try{return parseCidr(cidr)}catch{return null}}
-function safeCapacity(vlan){try{return endpointCapacity(vlan.cidr,Number(vlan.reserved??1))}catch{return 0}}
+function safeCapacity(vlan){try{return endpointCapacity(vlan.cidr,Number(vlan.reserved??1),{gateway:vlan.gateway})}catch{return 0}}
 function escapeHtml(value){return String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function roleClass(role){return ENUMS.vlanRoles.includes(role)?`role-${role}`:"role-other"}
 
