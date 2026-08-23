@@ -9,6 +9,7 @@
     "test:e2e": "playwright test",
     "check:provenance": "node scripts/check-release.mjs",
     "check:release": "npm run check:provenance && npm test && npm run test:e2e && npm audit --omit=dev && wrangler deploy --dry-run",
+    "check:production": "node scripts/check-production.mjs",
     "deploy": "wrangler deploy"
   },
   "devDependencies": {

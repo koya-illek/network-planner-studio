@@ -67,6 +67,9 @@ the unit suite, browser suite, dependency audit, and Wrangler dry run.
 
 ## Deploy
 
+Follow [RELEASE.md](RELEASE.md) for the acceptance checks and post-deployment
+production smoke test.
+
 ```sh
 npm run deploy
 ```
