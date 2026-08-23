@@ -413,7 +413,7 @@ function openConnectDialog(fromId,linkId=null){
   else{if(fromId)form.elements.from.value=fromId;form.elements.to.value=state.sites.find(s=>s.id!==form.elements.from.value)?.id||""}
   $("#connect-form-error").textContent="";$("#connect-dialog").showModal();
 }
-function nextVid(site){if(!site)return 10;for(const id of [10,20,30,40,50,60,70,80,90,99])if(!site.vlans.some(v=>v.vid===id))return id;return Math.min(4094,Math.max(...site.vlans.map(v=>v.vid),0)+1)}
+function nextVid(site){if(!site)return 10;for(const id of [10,20,30,40,50,60,70,80,90,99])if(!site.vlans.some(v=>v.vid===id))return id;for(let id=Math.max(...site.vlans.map(v=>v.vid),0)+1;id<=4094;id++)if(!site.vlans.some(v=>v.vid===id))return id;return 4094}
 
 const ROLE_DEFAULTS={
   users:{name:"Staff",vid:10},voice:{name:"Voice",vid:20},guest:{name:"Guest",vid:30},

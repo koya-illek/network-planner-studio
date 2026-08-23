@@ -147,3 +147,8 @@ test("iteration-8 defers workspace renders behind open modals", async () => {
   assert.match(app, /if\(\$\("dialog\[open\]"\)\)\{touch\.deferred=true;return\}/, "a debounced render must not replace DOM behind an open dialog");
   assert.match(app, /addEventListener\("close",e=>\{[^}]+\},true\)/, "the deferred render must flush when a dialog closes");
 });
+
+test("iteration-8 never proposes an occupied VLAN ID", async () => {
+  const app = await readFile(new URL("public/app.js", root), "utf8");
+  assert.match(app, /for\(let id=Math\.max\(\.\.\.site\.vlans\.map\(v=>v\.vid\),0\)\+1;id<=4094;id\+\+\)/, "nextVid must scan upward past occupied IDs instead of clamping onto them");
+});
