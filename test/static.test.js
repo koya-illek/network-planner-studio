@@ -31,8 +31,9 @@ test("worker exposes health and hardened assets", async () => {
   const headers = await readFile(new URL("public/_headers", root), "utf8");
   assert.match(worker, /\/api\/health/);
   assert.match(worker, /Content-Security-Policy/);
-  assert.ok(worker.includes("static.cloudflareinsights.com"));
+  assert.doesNotMatch(worker, /cloudflareinsights\.com/, "the local-only application must not allow unused third-party script or connection origins");
   assert.ok(headers.includes("Content-Security-Policy"));
+  assert.doesNotMatch(headers, /cloudflareinsights\.com/, "static headers must mirror the self-only runtime policy");
   const hsts="max-age=31536000; includeSubDomains; preload";
   assert.ok(worker.includes(hsts));
   assert.ok(headers.includes(hsts));

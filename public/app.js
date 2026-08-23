@@ -776,7 +776,7 @@ window.addEventListener("pagehide",()=>{if(touch.timer){clearTimeout(touch.timer
 window.addEventListener("storage",e=>{
   if(e.key!==STORAGE_KEY||!e.newValue)return;
   let incoming=null;try{incoming=JSON.parse(e.newValue)}catch{}
-  if(!incoming||incoming.projectId!==state.projectId||String(incoming.updatedAt)!==String(state.updatedAt))showToast("This design changed in another browser tab. Reload here or use Projects to pick the version to keep.");
+  if(!incoming||incoming.projectId===state.projectId&&String(incoming.updatedAt)!==String(state.updatedAt))showToast("This design changed in another browser tab. Reload here or use Projects to pick the version to keep.");
 });
 
 function findVlan(id){for(const site of state.sites){const vlan=site.vlans.find(v=>v.id===id);if(vlan)return{site,vlan}}return null}

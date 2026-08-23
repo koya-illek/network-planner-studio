@@ -246,6 +246,15 @@ test("warns when the current design changes in another browser tab", async ({ pa
   await other.close();
 });
 
+test("does not report a conflict when another tab saves a different design", async ({ page }) => {
+  const other = await page.context().newPage();
+  await other.goto("/");
+  await other.evaluate(() => localStorage.setItem("network-planner-studio.v1", JSON.stringify({projectId:"different-project",updatedAt:new Date().toISOString()})));
+  await page.waitForTimeout(300);
+  await expect(page.locator("#toast")).not.toContainText("another browser tab");
+  await other.close();
+});
+
 test("relayouts the canvas after edits made from other tabs", async ({ page }) => {
   const nodeBox = () => page.evaluate(() => {
     const canvas = document.querySelector("#canvas").getBoundingClientRect();

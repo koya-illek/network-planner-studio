@@ -95,7 +95,7 @@ Every entry path uses shared factories and validators. Manual forms, recommendat
 
 | Service or platform | Use | Project data sent | Required |
 | --- | --- | --- | --- |
-| Cloudflare Workers | Serves the application, redirects aliases, exposes `/api/health`, and provides observability | No project payload is submitted by normal use | Yes for hosted use |
+| Cloudflare Workers | Serves the application, redirects aliases, exposes `/api/health`, and provides server-side request observability | No project payload is submitted by normal use | Yes for hosted use |
 | Cloudflare Workers Assets | Serves HTML, CSS, JavaScript, icons, robots, and sitemap | No project data | Yes for hosted use |
 | Browser `localStorage` | Stores projects on the user's device. The current design and a 20-project library (most recently updated, current project always kept) are written through debounced saves; undo history is capped at 40 in-memory snapshots | Data stays in that browser profile | Optional persistence |
 | Browser print and download APIs | Produces user-controlled files and PDF handoff | Data leaves only through user-directed export | Optional |
