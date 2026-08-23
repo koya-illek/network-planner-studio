@@ -1,6 +1,6 @@
 {
   "name": "network-planner-studio",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,8 +11,8 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
-    "@playwright/test": "^1.61.1",
-    "wrangler": "^4.123.0"
+    "@playwright/test": "^1.62.1",
+    "wrangler": "^4.125.0"
   },
   "overrides": {
     "undici": "7.29.0"

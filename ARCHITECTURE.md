@@ -74,7 +74,7 @@ Every entry path uses shared factories and validators. Manual forms, recommendat
 3. Sites, VLANs, links, routes, policies, and assumptions pass through the canonical schema factories.
 4. Hard validation rejects malformed CIDRs, duplicates, invalid enums, dangling links, non-contained ranges, unsafe gateways, pool conflicts, and invalid reservations.
 5. Design guidance evaluates topology and operational intent separately from hard validity.
-6. The topology canvas renders the normalized model. Route tracing runs shortest-path and routing-intent calculations locally.
+6. The topology canvas renders the normalized model. Route tracing runs shortest-path and routing-intent calculations locally. Canvas layout is measured while the view is visible; edits made from other tabs defer the layout and it is flushed when Topology is opened again.
 7. Undo and redo preserve local editing history.
 8. Export serializes the same canonical model to versioned JSON, expanded CSV, or a print-ready implementation report.
 9. Import validates and either accepts, migrates with warnings, or visibly rejects invalid source data.
@@ -139,7 +139,8 @@ One Cloudflare Worker serves `network.illek.ie` and the compatibility hostname `
 
 ## Accessibility model
 
-- Landmarks, skip link, roving-tabindex tabs, keyboard-operable rows, nodes and WAN links, live form errors, and focus preservation across selection re-renders keep the planner operable without a pointer.
+- Landmarks, skip link, roving-tabindex tabs, keyboard-operable rows, nodes and WAN links, live form errors, and focus preservation across selection re-renders keep the planner operable without a pointer. Focus keeping also covers dialog-driven edits from inspector actions and the per-site VLAN shortcut, falling back to the inspector container when the originating control no longer exists.
+- The mobile Sites drawer keeps `aria-expanded` truthful across every close path, including selecting a site or VLAN from the drawer itself.
 - Touch targets meet 44 px on coarse pointers; reduced-motion preferences disable decorative animation.
 
 ## Non-goals
