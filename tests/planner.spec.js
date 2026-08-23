@@ -172,6 +172,21 @@ test("relayouts the canvas after edits made from other tabs", async ({ page }) =
   expect(Math.abs(after.top - before.top)).toBeLessThanOrEqual(2);
 });
 
+test("keeps the mobile sites drawer disclosure truthful", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(150);
+  const expanded = () => page.locator("#mobile-sites-button").getAttribute("aria-expanded");
+  await page.locator("#mobile-sites-button").click();
+  expect(await expanded()).toBe("true");
+  await page.locator(".site-row-select").last().click();
+  expect(await page.locator(".tool-panel")).not.toHaveClass(/mobile-open/);
+  expect(await expanded()).toBe("false");
+  await page.locator("#mobile-sites-button").click();
+  await page.locator(".vlan-row").first().click();
+  expect(await page.locator(".tool-panel")).not.toHaveClass(/mobile-open/);
+  expect(await expanded()).toBe("false");
+});
+
 test("keeps topology nodes inside the canvas on tablet widths", async ({ page }) => {  await page.setViewportSize({ width: 768, height: 900 });
   await page.waitForTimeout(250);
   const boxes = await page.evaluate(() => {

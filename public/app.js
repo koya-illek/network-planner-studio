@@ -96,6 +96,13 @@ function updateHistoryButtons(){
 function touch(){ $("#save-state").textContent="Saving…"; clearTimeout(touch.timer); touch.timer=setTimeout(()=>{saveState();render()},220)}
 function showToast(message){const el=$("#toast");el.textContent=message;el.classList.add("show");clearTimeout(showToast.timer);showToast.timer=setTimeout(()=>el.classList.remove("show"),2300)}
 
+// The mobile drawer's visible state and its aria-expanded disclosure must
+// move together, whichever path closes it.
+function setMobileSites(open){
+  $(".tool-panel").classList.toggle("mobile-open",open);
+  $("#mobile-sites-button").setAttribute("aria-expanded",String(open));
+}
+
 function start(mode){
   if(mode==="sample") state=sampleState();
   else {state=blankState();state.mode=mode}
@@ -106,6 +113,7 @@ function start(mode){
 function enterWorkspace(){
   $("#welcome").classList.toggle("hidden",!!state.mode);
   $("#workspace").classList.toggle("hidden",!state.mode);
+  setMobileSites(false);
 }
 function showHome(){
   stopTrace();
@@ -576,15 +584,15 @@ document.addEventListener("click",e=>{
   if(e.target.closest("#refresh-recommendation"))return buildRecommendation();
   if(e.target.closest("#apply-recommendation"))return applyRecommendation();
   if(e.target.closest("#hub-spoke-button"))return openHubDialog();
-  if(e.target.closest("#mobile-sites-button")){const open=$(".tool-panel").classList.toggle("mobile-open");$("#mobile-sites-button").setAttribute("aria-expanded",String(open));return}
+  if(e.target.closest("#mobile-sites-button")){setMobileSites(!$(".tool-panel").classList.contains("mobile-open"));return}
   if(e.target.closest("#zoom-in")){canvasZoom=Math.min(1.5,canvasZoom+.1);return applyCanvasZoom()}
   if(e.target.closest("#zoom-out")){canvasZoom=Math.max(.7,canvasZoom-.1);return applyCanvasZoom()}
   if(e.target.closest("#zoom-fit")){canvasZoom=1;canvasPan={x:0,y:0};return applyCanvasZoom()}
   const startButton=e.target.closest("[data-start]");if(startButton)return start(startButton.dataset.start);
   if(e.target.closest("#add-site-top,#add-site-side,#empty-add-site"))return openSiteDialog();
   const add=e.target.closest("[data-add-vlan],[data-inspector-add-vlan]");if(add)return openVlanDialog(add.dataset.addVlan||add.dataset.inspectorAddVlan);
-  const site=e.target.closest("[data-site]");if(site&&!e.target.closest("[data-add-vlan]")){selected={type:"site",id:site.dataset.site};$(".tool-panel").classList.remove("mobile-open");render();return}
-  const vlanEl=e.target.closest("[data-vlan]");if(vlanEl){selected={type:"vlan",id:vlanEl.dataset.vlan};render();return}
+  const site=e.target.closest("[data-site]");if(site&&!e.target.closest("[data-add-vlan]")){selected={type:"site",id:site.dataset.site};setMobileSites(false);render();return}
+  const vlanEl=e.target.closest("[data-vlan]");if(vlanEl){selected={type:"vlan",id:vlanEl.dataset.vlan};setMobileSites(false);render();return}
   const link=e.target.closest("[data-link]");if(link){selected={type:"link",id:link.dataset.link};render();return}
   const view=e.target.closest("[data-view]");if(view){activateView(view.dataset.view);return}
   const tool=e.target.closest("[data-tool]");if(tool){currentTool=tool.dataset.tool;$$("[data-tool]").forEach(b=>b.classList.toggle("active",b===tool));if(currentTool==="connect")openConnectDialog(selected?.type==="site"?selected.id:null);if(currentTool==="trace")openTraceDialog();return}
