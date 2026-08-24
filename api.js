@@ -52,7 +52,9 @@ export async function readJsonBody(request, { limitBytes = API_BODY_LIMIT_BYTES 
     throw new HttpProblem(413, "payload_too_large", `Request bodies are limited to ${limitBytes} bytes.`);
   }
   const text = await request.text();
-  if (text.length > limitBytes) {
+  // The cap is a byte budget: UTF-16 .length undercounts multi-byte content,
+  // so measure the actual UTF-8 size before parsing.
+  if (bodyEncoder.encode(text).length > limitBytes) {
     throw new HttpProblem(413, "payload_too_large", `Request bodies are limited to ${limitBytes} bytes.`);
   }
   if (!text.trim()) throw new HttpProblem(400, "empty_body", "The request body must contain a JSON document.");
@@ -62,6 +64,8 @@ export async function readJsonBody(request, { limitBytes = API_BODY_LIMIT_BYTES 
     throw new HttpProblem(400, "invalid_json", "The request body is not valid JSON.");
   }
 }
+
+const bodyEncoder = new TextEncoder();
 
 /** Canonicalize a submitted design without rejecting it; report what moved. */
 function parseDesign(rawDesign) {

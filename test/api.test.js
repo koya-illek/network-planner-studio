@@ -137,6 +137,17 @@ test("non-JSON and oversized bodies are rejected before compute", async () => {
   assert.equal(huge.status, 413);
 });
 
+test("the body cap counts bytes, not UTF-16 characters", async () => {
+  // ~700k multi-byte characters: under the limit in .length units, well over
+  // it once encoded to UTF-8.
+  const bloated = JSON.stringify({ design: validDesign(), padding: "\u2764".repeat(1024 * 700) });
+  assert.ok(bloated.length < 1024 * 1024, "the test payload must be char-under-limit");
+  assert.ok(new TextEncoder().encode(bloated).length > 1024 * 1024, "the test payload must be byte-over-limit");
+  const response = await postJson("/api/v1/validate", bloated);
+  assert.equal(response.status, 413);
+  assert.equal((await response.json()).error.code, "payload_too_large");
+});
+
 test("methods are guarded per route and preflight is answered", async () => {
   const wrongMethod = await fetchApi("/api/v1/validate");
   assert.equal(wrongMethod.status, 405);
