@@ -53,7 +53,7 @@ No project-data arrow returns to Cloudflare from normal browser use because desi
 | --- | --- | --- |
 | Cloudflare Worker | Serves static assets with security and cross-origin isolation headers, canonical-host redirects, a branded 404 page, a small health endpoint, and the machine surfaces | `worker.js` |
 | Shared hardening | Single source of the response security set plus machine-response additions (no-store, noindex, CORS) | `headers.js` |
-| REST planning API | Versioned stateless endpoints: validate, review, route, site/VLAN planning, subnet allocation, OpenAPI description, standalone JSON Schema of the design model | `api.js` |
+| REST planning API | Versioned stateless endpoints: validate, review, route, site/VLAN planning, subnet allocation, OpenAPI description, standalone JSON Schema of the design model, and the canonical example design | `api.js` |
 | MCP tool server | Streamable-HTTP (stateless JSON mode) tools mirroring the REST operations for AI agents | `mcp.js` |
 | Browser shell | Manages project workflows, forms, topology interaction, persistence, import, export, report rendering, and accessibility state | `public/app.js` |
 | Network core | Owns schema v3, normalization, validation, IPv4 and CIDR math, allocation, topology, routing, trace, migration, CSV, review heuristics, and report data | `public/network-core.js` |
@@ -85,7 +85,7 @@ Every entry path uses shared factories and validators. Manual forms, recommendat
 4. Hard validation rejects malformed CIDRs, duplicates, invalid enums, dangling links, non-contained ranges, unsafe gateways, pool conflicts, and invalid reservations.
 5. Design guidance evaluates topology and operational intent separately from hard validity.
 6. The topology canvas renders the normalized model. Route tracing runs shortest-path and routing-intent calculations locally. Canvas layout is measured while the view is visible; edits made from other tabs defer the layout and it is flushed when Topology is opened again.
-7. Rendering scales with interaction, not document size: hidden tabs (address plan, review, policy, report) are built when activated and invalidated by edits; entity selection repaints classes and the inspector; node drags and keyboard nudges move one node and its incident links. Large imported designs collapse the site tree to site rows with a search filter that spans names, ranges and VLANs.
+7. Rendering scales with interaction, not document size: hidden tabs (address plan, review, policy, report) are built when activated and invalidated by edits; entity selection repaints classes and the inspector without rebuilding rows; node drags and keyboard nudges move one node and its incident links. Large imported designs collapse the site tree to site rows with a search filter that spans names, ranges, types, roles and VLANs.
 8. Undo and redo preserve local editing history.
 9. Export serializes the same canonical model to versioned JSON, expanded CSV, or a print-ready implementation report. Printing always flushes a stale report first.
 10. Import validates and either accepts, migrates with warnings, or visibly rejects invalid source data.

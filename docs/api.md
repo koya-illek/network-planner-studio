@@ -67,6 +67,26 @@ curl -sS https://network.illek.ie/api/v1/design-schema.json | head -6
 }
 ```
 
+### `GET /api/v1/example-design`
+
+A complete, valid example design document — the same hub-and-spoke design
+behind the workspace's "explore a complete example" demo, built by the core
+model's factory functions. Its body passes `/validate` unchanged, so it is the
+fastest way to bootstrap: fetch it, edit it, and submit it to any compute
+endpoint.
+
+```sh
+curl -sS https://network.illek.ie/api/v1/example-design | jq '.sites[].name'
+```
+
+```json
+["Cork HQ", "Dublin office", "Azure production"]
+```
+
+Entity ids are stable (`hq`, `branch`, `cloud`, `link-hq-branch`, …), which
+makes the example easy to reference in tutorials and tests. The workspace demo
+assigns its own project id on top of this document.
+
 ### `POST /api/v1/validate`
 
 Canonicalize a design against schema v3 and run all hard checks.
@@ -185,7 +205,7 @@ the Streamable HTTP transport in stateless JSON mode:
 - `initialize` negotiates protocol `2025-06-18` (also accepts `2025-03-26`);
   requests that pin an unsupported version via the `MCP-Protocol-Version`
   header are refused with `400`
-- `tools/list` returns seven tools; every tool declares both an `inputSchema`
+- `tools/list` returns eight tools; every tool declares both an `inputSchema`
   and an `outputSchema`, `structuredContent` conforms to that output shape,
   and each tool carries `readOnlyHint`/`idempotentHint`/`openWorldHint`
   annotations (pure compute: no side effects, deterministic, no external
@@ -197,6 +217,7 @@ the Streamable HTTP transport in stateless JSON mode:
 
 | Tool | Purpose |
 | --- | --- |
+| `example_design` | Fetch the valid example design (bootstrap document) |
 | `validate_design` | Canonicalize + hard-check a design document |
 | `review_design` | Workspace review score and findings |
 | `find_route` | Permitted inter-site path trace |
