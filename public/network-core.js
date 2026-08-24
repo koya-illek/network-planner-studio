@@ -681,3 +681,121 @@ export function migrateDesign(input, { strict = true } = {}) {
 export function createDesign(values = {}) {
   return migrateDesign({ ...values, schema: SCHEMA_ID, version: SCHEMA_VERSION }, { strict: true });
 }
+
+/*
+ * Heuristic design review. Input is a canonical (migrated) design; output is
+ * presentation-free findings so the workspace UI, the REST API and the MCP
+ * tools all report exactly the same issues from one implementation.
+ */
+function reviewIssue(severity, title, message, siteId) {
+  const item = { severity, title, message };
+  if (siteId) item.siteId = siteId;
+  return item;
+}
+
+function parseOrIssue(cidr) {
+  try { return parseCidr(cidr); } catch { return null; }
+}
+
+export function reviewDesignIssues(design) {
+  const sites = Array.isArray(design?.sites) ? design.sites : [];
+  const links = Array.isArray(design?.links) ? design.links : [];
+  const issues = [];
+  for (const message of design?.importWarnings || []) issues.push(reviewIssue("warning", "Recovered design data", message));
+  if (!sites.length) return [...issues, reviewIssue("info", "Start the address hierarchy", "Add a site with a parent IPv4 range and create VLANs inside it.")];
+  const connectionCounts = new Map();
+  for (const link of links) {
+    connectionCounts.set(link.from, (connectionCounts.get(link.from) || 0) + 1);
+    connectionCounts.set(link.to, (connectionCounts.get(link.to) || 0) + 1);
+  }
+  for (let i = 0; i < sites.length; i++) {
+    const site = sites[i], sp = parseOrIssue(site.cidr);
+    if (!sp) issues.push(reviewIssue("error", "Invalid site range", `${site.name} does not have a valid IPv4 CIDR range.`, site.id));
+    else if (!isPrivateCidr(site.cidr)) issues.push(reviewIssue("warning", "Public site address space", `${site.name} uses ${site.cidr}, which is not RFC1918 private address space. Confirm ownership and intent.`, site.id));
+    for (let j = i + 1; j < sites.length; j++) if (rangesOverlap(site.cidr, sites[j].cidr)) issues.push(reviewIssue("error", "Overlapping site ranges", `${site.name} and ${sites[j].name} overlap. VPN routing between them will be ambiguous.`, site.id));
+    if ((connectionCounts.get(site.id) || 0) > 0 && site.wan === "single") issues.push(reviewIssue("warning", "Single WAN dependency", `${site.name} has inter-site connectivity but only one WAN path. Document the accepted outage risk.`, site.id));
+    if (!site.vlans.length) issues.push(reviewIssue("warning", "No VLANs defined", `${site.name} has a parent range but no usable networks yet.`, site.id));
+    const vids = new Map();
+    for (let vIndex = 0; vIndex < site.vlans.length; vIndex++) {
+      const vlan = site.vlans[vIndex], vp = parseOrIssue(vlan.cidr);
+      if (vids.has(vlan.vid)) issues.push(reviewIssue("error", "Duplicate VLAN ID", `${site.name} uses VLAN ${vlan.vid} for both ${vids.get(vlan.vid)} and ${vlan.name}.`, site.id));
+      vids.set(vlan.vid, vlan.name);
+      if (!vp) issues.push(reviewIssue("error", "Invalid VLAN subnet", `${site.name} / ${vlan.name} has an invalid IPv4 subnet.`, site.id));
+      else {
+        if (sp && !contains(site.cidr, vlan.cidr)) issues.push(reviewIssue("error", "VLAN outside site range", `${vlan.cidr} is not contained by ${site.name}'s ${site.cidr} allocation.`, site.id));
+        let capacity;
+        try { capacity = endpointCapacity(vlan.cidr, Number(vlan.reserved ?? 1), { gateway: vlan.gateway }); } catch { capacity = 0; }
+        if (vlan.devices > capacity) issues.push(reviewIssue("error", "Subnet over capacity", `${site.name} / ${vlan.name} needs ${vlan.devices} endpoint addresses but ${vlan.cidr} has only ${capacity} after reservations.`, site.id));
+        else if (capacity > 0 && vlan.devices / capacity > .8) issues.push(reviewIssue("warning", "Low address headroom", `${site.name} / ${vlan.name} is planned above 80% of endpoint capacity.`, site.id));
+        if (vp.prefix === 31 && vlan.role !== "transit") issues.push(reviewIssue("error", "Invalid /31 use", `${site.name} / ${vlan.name} uses /31 but is not a transit network.`, site.id));
+        if (vp.prefix < 22 && vlan.role !== "guest") issues.push(reviewIssue("advice", "Large broadcast domain", `${site.name} / ${vlan.name} is a /${vp.prefix}. Consider whether a smaller failure and broadcast domain is preferable.`, site.id));
+        if (!validateGateway(vlan.gateway, vlan.cidr, { transit: vlan.role === "transit" })) issues.push(reviewIssue("error", "Invalid gateway", `${site.name} / ${vlan.name} must use a usable gateway inside ${vlan.cidr}.`, site.id));
+        const pool = validateDhcpPool(vlan.cidr, vlan.gateway, vlan.reserved, { enabled: vlan.dhcpEnabled, start: vlan.dhcpStart, end: vlan.dhcpEnd });
+        for (const message of pool.errors) issues.push(reviewIssue("error", message.includes("gateway") ? "Gateway inside DHCP pool" : "Invalid DHCP pool", `${site.name} / ${vlan.name}: ${message}.`, site.id));
+      }
+      for (let k = vIndex + 1; k < site.vlans.length; k++) if (rangesOverlap(vlan.cidr, site.vlans[k].cidr)) issues.push(reviewIssue("error", "Overlapping VLAN subnets", `${site.name}: ${vlan.name} overlaps ${site.vlans[k].name}.`, site.id));
+    }
+    if (site.vlans.length >= 3 && !site.vlans.some(v => v.role === "management")) issues.push(reviewIssue("advice", "No management segment", `${site.name} has several VLANs but no dedicated network-management segment.`, site.id));
+    if (site.vlans.some(v => v.role === "guest") && site.vlans.some(v => v.role === "users")) issues.push(reviewIssue("info", "Trust boundary required", `${site.name}'s guest network should be denied access to private staff and infrastructure ranges.`, site.id));
+  }
+  if (sites.length > 1) {
+    // Iterative flood fill: a deep imported chain must not exhaust the stack.
+    const visited = new Set(), stack = [sites[0].id];
+    while (stack.length) {
+      const id = stack.pop();
+      if (visited.has(id)) continue;
+      visited.add(id);
+      for (const link of links) {
+        if (link.from === id) stack.push(link.to);
+        else if (link.to === id) stack.push(link.from);
+      }
+    }
+    for (const site of sites.filter(s => !visited.has(s.id))) issues.push(reviewIssue("warning", "Isolated site", `${site.name} is not connected to the rest of the topology.`, site.id));
+  }
+  for (const link of links) {
+    const a = sites.find(s => s.id === link.from), b = sites.find(s => s.id === link.to);
+    if (!a || !b) continue;
+    if (link.routingType === "static" && !(link.advertisedPrefixes || []).length) issues.push(reviewIssue("warning", "Static route intent is missing", `${a.name} ↔ ${b.name} uses static routing but has no documented advertised prefixes.`, a.id));
+    for (const prefix of link.advertisedPrefixes || []) {
+      try { parseRoutePrefix(prefix); } catch (error) { issues.push(reviewIssue("error", "Invalid advertised prefix", `${a.name} ↔ ${b.name}: ${error.message}.`, a.id)); continue; }
+      if (prefix !== "0.0.0.0/0" && !isPrivateRoutePrefix(prefix)) issues.push(reviewIssue("advice", "Non-private advertised prefix", `${a.name} ↔ ${b.name} advertises ${prefix}. Confirm ownership and intent.`, a.id));
+    }
+  }
+  if (design.topologyMode === "hub-spoke") {
+    const hubs = sites.filter(s => s.topologyRole === "hub"), spokes = sites.filter(s => s.topologyRole === "spoke");
+    if (!hubs.length) issues.push(reviewIssue("error", "Hub is missing", "Hub-and-spoke mode requires at least one site with the hub role."));
+    if (hubs.length === 1 && spokes.length > 1) issues.push(reviewIssue("warning", "Single hub dependency", `${hubs[0].name} is the only transit hub for ${spokes.length} spokes.`, hubs[0].id));
+    const secondary = sites.find(s => s.id === design.policies?.secondaryHubId && s.topologyRole === "hub");
+    if (design.policies?.secondaryHubId && !secondary) issues.push(reviewIssue("error", "Secondary hub is invalid", "The configured secondary hub no longer exists or no longer has the hub role."));
+    for (const spoke of spokes) {
+      const hub = sites.find(s => s.id === spoke.hubId && s.topologyRole === "hub");
+      if (!hub) issues.push(reviewIssue("error", "Spoke has no valid hub", `${spoke.name} is marked as a spoke but has no valid hub assignment.`, spoke.id));
+      else if (!links.some(l => (l.from === spoke.id && l.to === hub.id) || (l.to === spoke.id && l.from === hub.id))) issues.push(reviewIssue("error", "Spoke is not connected to hub", `${spoke.name} is assigned to ${hub.name} but no connection exists.`, spoke.id));
+      if (secondary && !links.some(l => (l.from === spoke.id && l.to === secondary.id) || (l.to === spoke.id && l.from === secondary.id))) issues.push(reviewIssue("warning", "Secondary hub path is missing", `${spoke.name} is not connected to secondary hub ${secondary.name}.`, spoke.id));
+      if (spoke.internetBreakout === "hub" && !links.some(l => ((l.from === spoke.id && l.to === spoke.hubId) || (l.to === spoke.id && l.from === spoke.hubId)) && l.defaultRoute)) issues.push(reviewIssue("warning", "Central breakout lacks default route", `${spoke.name} uses hub internet breakout but its hub link does not advertise a default route.`, spoke.id));
+    }
+    for (const link of links) {
+      const a = sites.find(s => s.id === link.from), b = sites.find(s => s.id === link.to);
+      if (a?.topologyRole === "spoke" && b?.topologyRole === "spoke") issues.push(reviewIssue("warning", "Direct spoke link conflicts with policy", `${a.name} and ${b.name} are directly connected even though spoke traffic is ${design.policies?.spokeToSpoke}.`, a.id));
+    }
+  }
+  if (!issues.some(i => ["error", "warning"].includes(i.severity))) issues.unshift(reviewIssue("info", "Core checks passed", "No overlaps, invalid allocations or immediate capacity risks were found."));
+  return issues;
+}
+
+/** The workspace score: 100 minus weighted findings, floored at zero. */
+export function designScore(issues) {
+  const count = severity => issues.filter(issue => issue.severity === severity).length;
+  return Math.max(0, 100 - count("error") * 18 - count("warning") * 7 - count("advice") * 2);
+}
+
+/** Default trust-zone policy between two VLAN roles when none is explicit. */
+export function defaultFlowPolicy(source, destination) {
+  if (source === destination) return "allow";
+  if (source === "guest") return "deny";
+  if (source === "management") return "allow";
+  if (source === "iot") return ["servers", "management"].includes(destination) ? "restricted" : "deny";
+  if (destination === "management") return "deny";
+  if (source === "users" && destination === "servers") return "restricted";
+  return "restricted";
+}

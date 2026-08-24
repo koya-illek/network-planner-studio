@@ -1,4 +1,4 @@
-import {SCHEMA_ID,SCHEMA_VERSION,ENUMS,parseCidr,parseRoutePrefix,rangesOverlap,contains,firstUsable,endpointCapacity,defaultDhcpPool,validateGateway,validateDhcpPool,prefixForDevices,nextSubnet,suggestSiteRange as suggestSiteRangeCore,isPrivateCidr,isPrivateRoutePrefix,guardCsvCell,unguardCsvCell,parseCsvRows,shortestPath,migrateDesign,createSite,createVlan,createLink} from "./network-core.js";
+import {SCHEMA_ID,SCHEMA_VERSION,ENUMS,parseCidr,parseRoutePrefix,rangesOverlap,contains,firstUsable,endpointCapacity,defaultDhcpPool,validateGateway,validateDhcpPool,prefixForDevices,nextSubnet,suggestSiteRange as suggestSiteRangeCore,reviewDesignIssues,designScore,defaultFlowPolicy,guardCsvCell,unguardCsvCell,parseCsvRows,shortestPath,migrateDesign,createSite,createVlan,createLink} from "./network-core.js";
 
 const STORAGE_KEY = "network-planner-studio.v1";
 const LIBRARY_KEY = "network-planner-studio.projects.v1";
@@ -276,108 +276,28 @@ function renderAddressPlan(){
 }
 
 let reviewCache=null;
-function reviewDesign(){
-  if(reviewCache)return reviewCache;
-  const issues=[];
-  for(const message of state.importWarnings||[])issues.push(issue("warning","Recovered design data",message));
-  if(!state.sites.length)return[...issues,{severity:"info",title:"Start the address hierarchy",message:"Add a site with a parent IPv4 range and create VLANs inside it."}];
-  for(let i=0;i<state.sites.length;i++){
-    const s=state.sites[i],sp=safeParse(s.cidr);
-    if(!sp)issues.push(issue("error","Invalid site range",`${s.name} does not have a valid IPv4 CIDR range.`,s.id));
-    else if(!isPrivateCidr(s.cidr))issues.push(issue("warning","Public site address space",`${s.name} uses ${s.cidr}, which is not RFC1918 private address space. Confirm ownership and intent.`,s.id));
-    for(let j=i+1;j<state.sites.length;j++)if(rangesOverlap(s.cidr,state.sites[j].cidr))issues.push(issue("error","Overlapping site ranges",`${s.name} and ${state.sites[j].name} overlap. VPN routing between them will be ambiguous.`,s.id));
-    if(s.wan==="single"&&connectionsFor(s.id)>0)issues.push(issue("warning","Single WAN dependency",`${s.name} has inter-site connectivity but only one WAN path. Document the accepted outage risk.`,s.id));
-    if(!s.vlans.length)issues.push(issue("warning","No VLANs defined",`${s.name} has a parent range but no usable networks yet.`,s.id));
-    const vids=new Map();
-    for(let vIndex=0;vIndex<s.vlans.length;vIndex++){
-      const v=s.vlans[vIndex],p=safeParse(v.cidr);
-      if(vids.has(v.vid))issues.push(issue("error","Duplicate VLAN ID",`${s.name} uses VLAN ${v.vid} for both ${vids.get(v.vid)} and ${v.name}.`,s.id));
-      vids.set(v.vid,v.name);
-      if(!p)issues.push(issue("error","Invalid VLAN subnet",`${s.name} / ${v.name} has an invalid IPv4 subnet.`,s.id));
-      else{
-        if(sp&&!contains(s.cidr,v.cidr))issues.push(issue("error","VLAN outside site range",`${v.cidr} is not contained by ${s.name}'s ${s.cidr} allocation.`,s.id));
-        const capacity=safeCapacity(v);
-        if(v.devices>capacity)issues.push(issue("error","Subnet over capacity",`${s.name} / ${v.name} needs ${v.devices} endpoint addresses but ${v.cidr} has only ${capacity} after reservations.`,s.id));
-        else if(capacity>0&&v.devices/capacity>.8)issues.push(issue("warning","Low address headroom",`${s.name} / ${v.name} is planned above 80% of endpoint capacity.`,s.id));
-        if(p.prefix===31&&v.role!=="transit")issues.push(issue("error","Invalid /31 use",`${s.name} / ${v.name} uses /31 but is not a transit network.`,s.id));
-        if(p.prefix<22&&v.role!=="guest")issues.push(issue("advice","Large broadcast domain",`${s.name} / ${v.name} is a /${p.prefix}. Consider whether a smaller failure and broadcast domain is preferable.`,s.id));
-        if(!validateGateway(v.gateway,v.cidr,{transit:v.role==="transit"}))issues.push(issue("error","Invalid gateway",`${s.name} / ${v.name} must use a usable gateway inside ${v.cidr}.`,s.id));
-        const pool=validateDhcpPool(v.cidr,v.gateway,v.reserved,{enabled:v.dhcpEnabled,start:v.dhcpStart,end:v.dhcpEnd});
-        for(const message of pool.errors)issues.push(issue("error",message.includes("gateway")?"Gateway inside DHCP pool":"Invalid DHCP pool",`${s.name} / ${v.name}: ${message}.`,s.id));
-      }
-      for(let k=vIndex+1;k<s.vlans.length;k++)if(rangesOverlap(v.cidr,s.vlans[k].cidr))issues.push(issue("error","Overlapping VLAN subnets",`${s.name}: ${v.name} overlaps ${s.vlans[k].name}.`,s.id));
-    }
-    if(s.vlans.length>=3&&!s.vlans.some(v=>v.role==="management"))issues.push(issue("advice","No management segment",`${s.name} has several VLANs but no dedicated network-management segment.`,s.id));
-    if(s.vlans.some(v=>v.role==="guest")&&s.vlans.some(v=>v.role==="users"))issues.push(issue("info","Trust boundary required",`${s.name}'s guest network should be denied access to private staff and infrastructure ranges.`,s.id));
-  }
-  if(state.sites.length>1){
-    // Iterative flood fill: a deep imported chain must not be able to exhaust
-    // the stack through recursive closure.
-    const visited=new Set(),stack=[state.sites[0].id];
-    while(stack.length){
-      const id=stack.pop();
-      if(visited.has(id))continue;
-      visited.add(id);
-      for(const l of state.links){
-        if(l.from===id)stack.push(l.to);
-        else if(l.to===id)stack.push(l.from);
-      }
-    }
-    state.sites.filter(s=>!visited.has(s.id)).forEach(s=>issues.push(issue("warning","Isolated site",`${s.name} is not connected to the rest of the topology.`,s.id)));
-  }
-  for(const link of state.links){
-    const a=state.sites.find(s=>s.id===link.from),b=state.sites.find(s=>s.id===link.to);if(!a||!b)continue;
-    if(link.routingType==="static"&&!(link.advertisedPrefixes||[]).length)issues.push(issue("warning","Static route intent is missing",`${a.name} ↔ ${b.name} uses static routing but has no documented advertised prefixes.`,a.id));
-    for(const prefix of link.advertisedPrefixes||[]){try{parseRoutePrefix(prefix)}catch(error){issues.push(issue("error","Invalid advertised prefix",`${a.name} ↔ ${b.name}: ${error.message}.`,a.id));continue}if(prefix!=="0.0.0.0/0"&&!isPrivateRoutePrefix(prefix))issues.push(issue("advice","Non-private advertised prefix",`${a.name} ↔ ${b.name} advertises ${prefix}. Confirm ownership and intent.`,a.id));}
-  }
-  if(state.topologyMode==="hub-spoke"){
-    const hubs=state.sites.filter(s=>s.topologyRole==="hub"),spokes=state.sites.filter(s=>s.topologyRole==="spoke");
-    if(!hubs.length)issues.push(issue("error","Hub is missing","Hub-and-spoke mode requires at least one site with the hub role."));
-    if(hubs.length===1&&spokes.length>1)issues.push(issue("warning","Single hub dependency",`${hubs[0].name} is the only transit hub for ${spokes.length} spokes.`,hubs[0].id));
-    const secondary=state.sites.find(s=>s.id===state.policies?.secondaryHubId&&s.topologyRole==="hub");
-    if(state.policies?.secondaryHubId&&!secondary)issues.push(issue("error","Secondary hub is invalid","The configured secondary hub no longer exists or no longer has the hub role."));
-    for(const spoke of spokes){
-      const hub=state.sites.find(s=>s.id===spoke.hubId&&s.topologyRole==="hub");
-      if(!hub)issues.push(issue("error","Spoke has no valid hub",`${spoke.name} is marked as a spoke but has no valid hub assignment.`,spoke.id));
-      else if(!state.links.some(l=>(l.from===spoke.id&&l.to===hub.id)||(l.to===spoke.id&&l.from===hub.id)))issues.push(issue("error","Spoke is not connected to hub",`${spoke.name} is assigned to ${hub.name} but no connection exists.`,spoke.id));
-      if(secondary&&!state.links.some(l=>(l.from===spoke.id&&l.to===secondary.id)||(l.to===spoke.id&&l.from===secondary.id)))issues.push(issue("warning","Secondary hub path is missing",`${spoke.name} is not connected to secondary hub ${secondary.name}.`,spoke.id));
-      if(spoke.internetBreakout==="hub"&&!state.links.some(l=>((l.from===spoke.id&&l.to===spoke.hubId)||(l.to===spoke.id&&l.from===spoke.hubId))&&l.defaultRoute))issues.push(issue("warning","Central breakout lacks default route",`${spoke.name} uses hub internet breakout but its hub link does not advertise a default route.`,spoke.id));
-    }
-    for(const link of state.links){const a=state.sites.find(s=>s.id===link.from),b=state.sites.find(s=>s.id===link.to);if(a?.topologyRole==="spoke"&&b?.topologyRole==="spoke")issues.push(issue("warning","Direct spoke link conflicts with policy",`${a.name} and ${b.name} are directly connected even though spoke traffic is ${state.policies.spokeToSpoke}.`,a.id));}
-  }
-  if(!issues.some(i=>["error","warning"].includes(i.severity)))issues.unshift(issue("info","Core checks passed","No overlaps, invalid allocations or immediate capacity risks were found."));
-  reviewCache=issues;
-  return issues;
-}
-function issue(severity,title,message,siteId){return{severity,title,message,siteId}}
+// The heuristics live in the core model so the API and MCP surfaces report
+// exactly the same findings as this workspace.
+function reviewDesign(){if(reviewCache)return reviewCache;return reviewCache=reviewDesignIssues(state)}
 function renderReview(){
   const issues=reviewDesign(),errors=issues.filter(i=>i.severity==="error").length,warnings=issues.filter(i=>i.severity==="warning").length;
-  const score=Math.max(0,100-errors*18-warnings*7-issues.filter(i=>i.severity==="advice").length*2);
+  const score=designScore(issues);
   $("#issue-count").textContent=errors+warnings;$("#issue-count").classList.toggle("has-errors",errors+warnings>0);
   $("#review-score").innerHTML=`<div class="score-ring" role="img" aria-label="Design score ${score} out of 100">${score}</div><div><h2>${errors?`${errors} blocking issue${errors===1?"":"s"} found`:warnings?`${warnings} design risk${warnings===1?"":"s"} to review`:"The foundations look healthy"}</h2><p>${errors?"Resolve address conflicts before implementation or connecting sites.":"Recommendations remain editable; document intentional exceptions."}</p></div>`;
   const assumptions=(state.assumptions||[]).map(message=>({severity:"info",title:"Design assumption",message}));
   $("#review-list").innerHTML=[...issues,...assumptions].map(i=>`<article class="review-item ${i.severity}"><span class="review-icon">${i.severity==="error"?"!":i.severity==="warning"?"△":"✓"}</span><div><h3>${escapeHtml(i.title)}</h3><p>${escapeHtml(i.message)}</p></div><small>${i.severity}</small></article>`).join("");
 }
-function defaultFlow(source,destination){
-  if(source===destination)return"allow";
-  if(source==="guest")return"deny";
-  if(source==="management")return"allow";
-  if(source==="iot")return["servers","management"].includes(destination)?"restricted":"deny";
-  if(destination==="management")return"deny";
-  if(source==="users"&&destination==="servers")return"restricted";
-  return"restricted";
-}
 function renderTrafficPolicy(){
   const root=$("#flow-matrix");if(!root)return;const roles=[...new Set(state.sites.flatMap(s=>s.vlans.map(v=>v.role)))];
   if(!roles.length){root.innerHTML="<p class=\"empty-policy\">Add VLANs to build the trust-zone matrix.</p>";return}
-  root.innerHTML=`<table><thead><tr><th scope="col">Source / destination</th>${roles.map(r=>`<th scope="col">${escapeHtml(r)}</th>`).join("")}</tr></thead><tbody>${roles.map(source=>`<tr><th scope="row">${escapeHtml(source)}</th>${roles.map(destination=>{const key=`${source}:${destination}`;if(source===destination)return`<td><span class="flow-cell-self">same zone</span></td>`;const raw=state.flowPolicies?.[key],value=ENUMS.flowPolicies.includes(raw)?raw:defaultFlow(source,destination);return`<td><button class="flow-cell ${value}" data-flow="${key}" type="button" aria-label="${escapeHtml(`${source} to ${destination}: ${value}`)}">${escapeHtml(value)}</button></td>`}).join("")}</tr>`).join("")}</tbody></table>`;
+  root.innerHTML=`<table><thead><tr><th scope="col">Source / destination</th>${roles.map(r=>`<th scope="col">${escapeHtml(r)}</th>`).join("")}</tr></thead><tbody>${roles.map(source=>`<tr><th scope="row">${escapeHtml(source)}</th>${roles.map(destination=>{const key=`${source}:${destination}`;if(source===destination)return`<td><span class="flow-cell-self">same zone</span></td>`;const raw=state.flowPolicies?.[key],value=ENUMS.flowPolicies.includes(raw)?raw:defaultFlowPolicy(source,destination);return`<td><button class="flow-cell ${value}" data-flow="${key}" type="button" aria-label="${escapeHtml(`${source} to ${destination}: ${value}`)}">${escapeHtml(value)}</button></td>`}).join("")}</tr>`).join("")}</tbody></table>`;
 }
 
 function renderReport(){
   const root=$("#implementation-report");if(!root)return;
   const issues=reviewDesign(),blocking=issues.filter(i=>i.severity==="error").length,risks=issues.filter(i=>i.severity==="warning").length;
   const vlans=state.sites.flatMap(site=>site.vlans.map(vlan=>({site,vlan}))),siteName=id=>state.sites.find(s=>s.id===id)?.name||"Unknown",roles=[...new Set(vlans.map(({vlan})=>vlan.role))];
-  const policyRows=roles.flatMap(source=>roles.filter(destination=>destination!==source).map(destination=>{const key=`${source}:${destination}`,value=ENUMS.flowPolicies.includes(state.flowPolicies?.[key])?state.flowPolicies[key]:defaultFlow(source,destination);return`<tr><td>${escapeHtml(source)}</td><td>${escapeHtml(destination)}</td><td>${escapeHtml(value)}</td><td>${value==="deny"?"Trust boundary enforced":value==="allow"?"Explicitly permitted":"Review required before implementation"}</td></tr>`})).join("");
+  const policyRows=roles.flatMap(source=>roles.filter(destination=>destination!==source).map(destination=>{const key=`${source}:${destination}`,value=ENUMS.flowPolicies.includes(state.flowPolicies?.[key])?state.flowPolicies[key]:defaultFlowPolicy(source,destination);return`<tr><td>${escapeHtml(source)}</td><td>${escapeHtml(destination)}</td><td>${escapeHtml(value)}</td><td>${value==="deny"?"Trust boundary enforced":value==="allow"?"Explicitly permitted":"Review required before implementation"}</td></tr>`})).join("");
   const breakoutRows=state.sites.map(site=>`<tr><td>${escapeHtml(site.name)}</td><td>${escapeHtml(site.topologyRole)}</td><td>${escapeHtml(site.hubId?siteName(site.hubId):"Not assigned")}</td><td>${escapeHtml(site.internetBreakout||"local")}</td><td>${state.policies?.centralizedInspection?"Central inspection intended":"No centralized inspection intent"}</td></tr>`).join("");
   const unresolved=issues.filter(item=>["error","warning","advice"].includes(item.severity));
   root.innerHTML=`<article class="report-sheet">
