@@ -96,8 +96,18 @@ const vlanPlanResultSchema = {
   properties: { plan: plannedVlanSchema }
 };
 const sitesInput = {
-  type: "array", items: { type: "object", description: "A design site (id, cidr, vlans)." },
-  description: "Existing sites, used for range avoidance and VLAN ID conventions."
+  type: "array",
+  items: {
+    type: "object", required: ["id", "cidr"],
+    properties: {
+      id: { type: "string" },
+      name: { type: "string" },
+      cidr: { type: "string", description: "Parent allocation, avoided when suggesting new blocks." },
+      growth: { type: "number" },
+      vlans: { type: "array", items: { type: "object", required: ["vid", "role"], properties: { vid: { type: "integer" }, role: { type: "string" }, cidr: { type: "string" } } } }
+    }
+  },
+  description: "Existing sites, used for range avoidance and VLAN ID conventions. Full design sites are accepted; only these fields are read."
 };
 
 const TOOLS = [

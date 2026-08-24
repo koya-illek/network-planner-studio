@@ -418,7 +418,7 @@ function openapi() {
               devices: { type: "integer", minimum: 1, maximum: 50000, default: 50, description: "Planned primary devices; role shares derive from it." },
               growth: { type: "number", minimum: 0, maximum: 1000, default: 30 },
               name: { type: "string", default: "New site" },
-              sites: { type: "array", items: designRef, description: "Existing sites, used for range avoidance and VLAN ID conventions." }
+              sites: { type: "array", items: { $ref: "#/components/schemas/PlanningSite" }, description: "Existing sites, used for range avoidance and VLAN ID conventions." }
             }
           }),
           responses: { ...jsonResponseFor({ $ref: "#/components/schemas/SitePlan" }), ...errors }
@@ -432,7 +432,7 @@ function openapi() {
             type: "object",
             required: ["sites", "siteId"],
             properties: {
-              sites: { type: "array", items: designRef, description: "The design's sites; one must match siteId." },
+              sites: { type: "array", items: { $ref: "#/components/schemas/PlanningSite" }, description: "The design's sites; one must match siteId." },
               siteId: { type: "string", description: "Id of the site that will own the new VLAN." },
               role: { type: "string", enum: ["users", "voice", "guest", "iot", "servers", "management", "transit", "other"], default: "other" },
               devices: { type: "integer", minimum: 1, maximum: 65534, default: 30 },
@@ -531,6 +531,25 @@ function openapi() {
             dhcpStart: { type: "string" },
             dhcpEnd: { type: "string" },
             notes: { type: "string" }
+          }
+        },
+        PlanningSite: {
+          type: "object",
+          description: "An existing site as planning context. Only the fields the planner reads are described; full design sites are accepted.",
+          required: ["id", "cidr"],
+          properties: {
+            id: { type: "string" },
+            name: { type: "string" },
+            cidr: { type: "string", description: "Parent allocation, avoided when suggesting new blocks." },
+            growth: { type: "number", description: "Used by VLAN planning when the target site omits it." },
+            vlans: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["vid", "role"],
+                properties: { vid: { type: "integer" }, role: { type: "string" }, cidr: { type: "string" } }
+              }
+            }
           }
         },
         SitePlan: {

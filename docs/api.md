@@ -132,7 +132,7 @@ Allocates the next aligned free subnet inside a parent range:
 ### `POST /api/v1/site-range/suggest`
 
 Suggests a non-overlapping RFC1918 block sized for a device count:
-`{"occupied":["10.20.0.0/16"],"devices":50}` → `{"cidr":"10.21.0.0/20"}`.
+`{"occupied":["10.20.0.0/16"],"devices":50}` → `{"cidr":"10.0.0.0/20"}`.
 
 ### `POST /api/v1/sites/plan`
 
@@ -151,9 +151,9 @@ curl -sS https://network.illek.ie/api/v1/sites/plan \
 ```json
 { "ok": true, "result": { "plan": {
     "name": "Limerick office", "type": "branch", "devices": 60, "growth": 30,
-    "cidr": "10.21.0.0/20",
+    "cidr": "10.0.0.0/20",
     "vlans": [ { "name": "Staff", "vid": 10, "role": "users", "devices": 60,
-                 "cidr": "10.21.0.0/24", "gateway": "10.21.0.1", "…": "…" } ] } } }
+                 "cidr": "10.0.0.0/25", "gateway": "10.0.0.1", "…": "…" } ] } } }
 ```
 
 Plans are **identity-free**: assign object ids when merging into a design.

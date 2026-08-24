@@ -18,8 +18,8 @@ The workbench models existing and planned network environments through:
 - overlap, containment, gateway, broadcast, capacity, pool, reservation, enum, and identifier validation
 - trust-zone traffic policies and implementation assumptions
 - animated multi-hop route tracing through transit hubs
-- recommendation workflows using the same canonical schema as manual entry
-- local projects, undo and redo, JSON migration, lossless CSV exchange, and print-ready reports
+- recommendation workflows (`recommendSitePlan`, `recommendVlanPlan` in the core model) producing identity-free plans through the same factories as manual entry
+- local projects, byte-budgeted undo and redo, JSON migration, lossless CSV exchange, and print-ready reports
 
 The application plans and explains intent. It does not discover live infrastructure or push configuration.
 
