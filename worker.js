@@ -3,8 +3,6 @@ import { SECURITY_HEADERS } from "./headers.js";
 import { handleApiRequest } from "./api.js";
 import { handleMcpRequest } from "./mcp.js";
 
-export { SECURITY_HEADERS };
-
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
