@@ -92,7 +92,8 @@ test("round-3 safeguards stay wired: native keyboard activation, tolerant reviva
     "Enter/Space handling must not hijack native controls inside rows"
   );
   assert.match(app, /function reviveDesign\(raw\)\{try\{return migrateDesign\(raw\)\}catch\{return migrateDesign\(raw,\{strict:false\}\)\}\}/, "internal state revival must fall back to lenient migration");
-  assert.ok((app.match(/reviveDesign\(/g) ?? []).length >= 4, "undo/redo, duplicate and library open must use tolerant revival");
+  assert.ok((app.match(/reviveDesign\(/g) ?? []).length >= 3, "duplicate and library open must use tolerant revival");
+  assert.match(app, /state=JSON\.parse\(json\);selected=null/, "undo and redo must restore pre-mutation snapshots without a redundant validation pass");
   assert.match(app, /data-dynamic-growth/, "site dialog must preserve off-list growth allowances");
   assert.ok(app.includes('resizeFrame=requestAnimationFrame(renderCanvas)') === false && app.includes("resizeFrame=requestAnimationFrame(()=>{const keeper=focusKeeper();renderCanvas();restoreFocus(keeper)})"), "resize relayout must be coalesced, trace-safe and keep node focus");
   assert.match(app, /aria-label="Design score \$\{score\} out of 100"/, "score ring needs an accessible name");

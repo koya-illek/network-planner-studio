@@ -86,14 +86,35 @@ function saveState(){
   $("#save-state").textContent=saved&&librarySaved?"Saved locally":"Storage needs recovery";
   if(!saved||!librarySaved) showToast(storageIssue);
 }
+// History entries hold whole-design snapshots. Without a ceiling, a large
+// imported design multiplied by forty entries pins tens of megabytes of
+// strings for the session; the budget keeps the newest entries instead.
+const HISTORY_BYTE_BUDGET = 12 * 1024 * 1024;
+let historyBytes = {undo:0,redo:0};
+function admitHistory(stack,budgetKey,json){
+  stack.push(json);
+  historyBytes[budgetKey]+=json.length;
+  while(stack.length>1&&historyBytes[budgetKey]>HISTORY_BYTE_BUDGET)historyBytes[budgetKey]-=stack.shift().length;
+}
 function pushHistory(){
-  undoStack.push(JSON.stringify(state));if(undoStack.length>40)undoStack.shift();redoStack=[];nudgeBurst={siteId:null,at:0};updateHistoryButtons();
+  admitHistory(undoStack,"undo",JSON.stringify(state));
+  if(redoStack.length){redoStack=[];historyBytes.redo=0}
+  nudgeBurst={siteId:null,at:0};updateHistoryButtons();
 }
 function reviveDesign(raw){try{return migrateDesign(raw)}catch{return migrateDesign(raw,{strict:false})}}
 function restoreHistory(source,target){
   // Expansions survive undo: rolling back an edit must not also collapse
   // the branch the user is working in.
-  if(!source.length)return;target.push(JSON.stringify(state));state=reviveDesign(JSON.parse(source.pop()));selected=null;nudgeBurst={siteId:null,at:0};saveState();render();updateHistoryButtons();
+  if(!source.length)return;
+  const json=source.pop();
+  historyBytes[source===undoStack?"undo":"redo"]-=json.length;
+  // The pre-restore design moves to the opposite stack under the same
+  // budget rules as any new entry.
+  admitHistory(target,target===redoStack?"redo":"undo",JSON.stringify(state));
+  // Snapshots are clones taken before each validated mutation, so the parsed
+  // document is already canonical; re-migrating multi-thousand-site designs
+  // would make every undo pay a full validation pass for nothing.
+  state=JSON.parse(json);selected=null;nudgeBurst={siteId:null,at:0};saveState();render();updateHistoryButtons();
 }
 function updateHistoryButtons(){
   $("#undo-button").disabled=!undoStack.length;$("#redo-button").disabled=!redoStack.length;

@@ -68,6 +68,40 @@ await page.waitForTimeout(300);
 const firstNode = await page.locator(".topology-node").nth(2);
 await firstNode.focus();
 
+// A real drag gesture: pointerdown snapshots the whole design into undo
+// history before anything moves, so its cost scales with the design.
+const box = await page.locator(".topology-node").nth(4).boundingBox();
+async function measureDragGesture() {
+  const start = Date.now();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 40, box.y + box.height / 2 + 20, { steps: 4 });
+  await page.mouse.up();
+  return Date.now() - start;
+}
+const gestures = [];
+for (let i = 0; i < SAMPLES; i++) {
+  await page.waitForTimeout(80);
+  gestures.push(await measureDragGesture());
+  // Settle the save debounce so each gesture starts from a quiet editor.
+  await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 300)));
+}
+
+// Undo restores the pre-gesture snapshot: parse + revalidation of the whole
+// design on the main thread.
+async function measureUndo() {
+  const start = Date.now();
+  await page.keyboard.press("Control+z");
+  return Date.now() - start;
+}
+const undos = [];
+for (let i = 0; i < SAMPLES; i++) {
+  await page.waitForTimeout(120);
+  undos.push(await measureUndo());
+}
+// Redo walks back forward so repeated samples stay meaningful.
+for (let i = 0; i < SAMPLES; i++) await page.keyboard.press("Control+Shift+z");
+
 const clicks = [], nudges = [];
 for (let i = 0; i < SAMPLES; i++) {
   await page.waitForTimeout(80);
@@ -94,6 +128,9 @@ console.log(`sites=${SITES} vlans=${SITES * 3}`);
 console.log(`cold workspace entry: ${coldMs} ms`);
 console.log(`select-node median: ${median(clicks).toFixed(1)} ms  (all: ${clicks.map(v => v.toFixed(1)).join(", ")})`);
 console.log(`nudge-step median : ${median(nudges).toFixed(1)} ms  (all: ${nudges.map(v => v.toFixed(1)).join(", ")})`);
+console.log(`drag-gesture median: ${median(gestures).toFixed(1)} ms  (all: ${gestures.map(v => v.toFixed(1)).join(", ")})`);
+console.log(`undo median        : ${median(undos).toFixed(1)} ms  (all: ${undos.map(v => v.toFixed(1)).join(", ")})`);
 console.log(`address-plan tab switch: ${addressingSwitch.toFixed(1)} ms, rows=${addressRows}`);
 console.log(`dom nodes total   : ${(await page.evaluate(() => document.getElementsByTagName("*").length))}`);
+console.log(`history bytes     : ${(await page.evaluate(() => performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1024) : -1))} KiB usedJSHeapSize`);
 await browser.close();
