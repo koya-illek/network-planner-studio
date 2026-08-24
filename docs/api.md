@@ -37,13 +37,35 @@ path, `405` wrong method (`Allow` header says what is allowed), `413` oversized,
 
 ### `GET /api/v1`
 
-Self-describing directory: service name and version, schema id/version, and the
-endpoint list below.
+Self-describing directory: service name and version, schema id/version, the
+endpoint list below, and pointers to the sibling machine surfaces (`mcp`,
+`designSchema`).
 
 ### `GET /api/v1/openapi.json`
 
 An OpenAPI 3.1 description of every operation, including a structural schema of
 the canonical design document.
+
+### `GET /api/v1/design-schema.json`
+
+The canonical design document as a standalone JSON Schema (draft 2020-12),
+served as `application/schema+json` with a stable `$id`. Use it to validate
+designs offline with any standard JSON Schema validator instead of
+round-tripping through `/validate`; it mirrors `components.schemas.DesignDocument`
+in the OpenAPI document exactly.
+
+```sh
+curl -sS https://network.illek.ie/api/v1/design-schema.json | head -6
+```
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://network.illek.ie/api/v1/design-schema.json",
+  "title": "Network Planner Studio design document",
+  "type": "object"
+}
+```
 
 ### `POST /api/v1/validate`
 
@@ -117,9 +139,14 @@ Suggests a non-overlapping RFC1918 block sized for a device count:
 Connect an MCP client to `https://network.illek.ie/mcp`. The server implements
 the Streamable HTTP transport in stateless JSON mode:
 
-- `initialize` negotiates protocol `2025-06-18` (also accepts `2025-03-26`)
+- `initialize` negotiates protocol `2025-06-18` (also accepts `2025-03-26`);
+  requests that pin an unsupported version via the `MCP-Protocol-Version`
+  header are refused with `400`
 - `tools/list` returns five tools; every tool declares both an `inputSchema`
-  and an `outputSchema`, and `structuredContent` conforms to that output shape
+  and an `outputSchema`, `structuredContent` conforms to that output shape,
+  and each tool carries `readOnlyHint`/`idempotentHint`/`openWorldHint`
+  annotations (pure compute: no side effects, deterministic, no external
+  systems). The tool list is stable (`listChanged: false`)
 - `tools/call` computes and returns `structuredContent`; engine rejections come
   back as tool results with `isError: true`, never as protocol errors
 - notifications are answered with `202 Accepted`; `GET`/`DELETE` return `405`;

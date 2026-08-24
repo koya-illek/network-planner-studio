@@ -1,6 +1,6 @@
 # Network Planner Studio architecture
 
-Last reviewed: 2026-08-23 (round 2)
+Last reviewed: 2026-08-23 (round 4)
 
 Network Planner Studio is a local-first IPv4 design workbench. Cloudflare serves the application, while network designs, calculations, history, and exports remain in the user's browser unless the user deliberately downloads or imports a file. A stateless machine surface (`/api/v1`, `/mcp`) exposes the same planning engine to scripts and AI agents; submitted documents are computed and discarded, never stored.
 
@@ -53,7 +53,7 @@ No project-data arrow returns to Cloudflare from normal browser use because desi
 | --- | --- | --- |
 | Cloudflare Worker | Serves static assets with security and cross-origin isolation headers, canonical-host redirects, a branded 404 page, a small health endpoint, and the machine surfaces | `worker.js` |
 | Shared hardening | Single source of the response security set plus machine-response additions (no-store, noindex, CORS) | `headers.js` |
-| REST planning API | Versioned stateless endpoints: validate, review, route, subnet allocation, OpenAPI description | `api.js` |
+| REST planning API | Versioned stateless endpoints: validate, review, route, subnet allocation, OpenAPI description, standalone JSON Schema of the design model | `api.js` |
 | MCP tool server | Streamable-HTTP (stateless JSON mode) tools mirroring the REST operations for AI agents | `mcp.js` |
 | Browser shell | Manages project workflows, forms, topology interaction, persistence, import, export, report rendering, and accessibility state | `public/app.js` |
 | Network core | Owns schema v3, normalization, validation, IPv4 and CIDR math, allocation, topology, routing, trace, migration, CSV, review heuristics, and report data | `public/network-core.js` |
@@ -85,9 +85,10 @@ Every entry path uses shared factories and validators. Manual forms, recommendat
 4. Hard validation rejects malformed CIDRs, duplicates, invalid enums, dangling links, non-contained ranges, unsafe gateways, pool conflicts, and invalid reservations.
 5. Design guidance evaluates topology and operational intent separately from hard validity.
 6. The topology canvas renders the normalized model. Route tracing runs shortest-path and routing-intent calculations locally. Canvas layout is measured while the view is visible; edits made from other tabs defer the layout and it is flushed when Topology is opened again.
-7. Undo and redo preserve local editing history.
-8. Export serializes the same canonical model to versioned JSON, expanded CSV, or a print-ready implementation report.
-9. Import validates and either accepts, migrates with warnings, or visibly rejects invalid source data.
+7. Rendering scales with interaction, not document size: hidden tabs (address plan, review, policy, report) are built when activated and invalidated by edits; entity selection repaints classes and the inspector; node drags and keyboard nudges move one node and its incident links. Large imported designs collapse the site tree to site rows with a search filter that spans names, ranges and VLANs.
+8. Undo and redo preserve local editing history.
+9. Export serializes the same canonical model to versioned JSON, expanded CSV, or a print-ready implementation report. Printing always flushes a stale report first.
+10. Import validates and either accepts, migrates with warnings, or visibly rejects invalid source data.
 
 ## IPv4 rules
 
@@ -133,7 +134,7 @@ The product is intentionally browser-first.
 | --- | --- |
 | `/` | Complete planning application |
 | `GET`, `HEAD`, or `OPTIONS /api/health` | Service, schema and release liveness plus machine-surface locations (`api`, `mcp`) |
-| `/api/v1/*` | Versioned stateless REST computations (validate, review, route, allocation) with an OpenAPI description — see [docs/api.md](docs/api.md) |
+| `/api/v1/*` | Versioned stateless REST computations (validate, review, route, allocation) with an OpenAPI description and a standalone JSON Schema of the canonical document — see [docs/api.md](docs/api.md) |
 | `/mcp` | MCP tool server exposing the same operations to AI agents |
 | JSON import and export | Lossless versioned design exchange |
 | CSV import and export | Address-plan and topology exchange |
@@ -165,6 +166,7 @@ One Cloudflare Worker serves `network.illek.ie` and the compatibility hostname `
 - Touch targets meet 44 px on coarse pointers; reduced-motion preferences disable decorative animation.
 - Canvas status is not colour-only: unhealthy sites carry a text flag and their accessible name names the severity, connection labels announce transport type and resilience in words, trace progress is a live region, and Escape clears the inspector selection.
 - On touch screens the canvas claims its gestures with `touch-action: none`, two-finger pinch zooms within the same clamped range as the zoom controls, and a cancelled or interrupted gesture aborts cleanly instead of leaving a stuck drag. A cancelled node drag also returns the site to its pre-drag position. Consecutive arrow-key nudges of one node record one undo entry; moving another node or using undo or redo starts a new history entry.
+- The site-tree filter is a labelled search field; its match count is a polite live region, so narrowing a large design is announced without stealing focus.
 
 ## Non-goals
 
