@@ -123,10 +123,12 @@ export function opRoute({ design, from, to }) {
     topologyMode: migrated.topologyMode,
     spokeToSpoke: migrated.policies?.spokeToSpoke || "via-hub"
   });
+  // One name lookup per site instead of a rescan per hop.
+  const namesById = new Map(migrated.sites.map(site => [site.id, site.name]));
   return {
     reachable: Boolean(route),
     policyApplied: { topologyMode: migrated.topologyMode, spokeToSpoke: migrated.policies?.spokeToSpoke || "via-hub" },
-    hops: route ? route.sites.map(id => migrated.sites.find(site => site.id === id)?.name || id) : [],
+    hops: route ? route.sites.map(id => namesById.get(id) || id) : [],
     hopIds: route ? [...route.sites] : [],
     links: route ? [...route.links] : []
   };

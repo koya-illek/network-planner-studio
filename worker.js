@@ -1,5 +1,6 @@
 import packageMetadata from "./package.json" with { type: "json" };
 import { SECURITY_HEADERS } from "./headers.js";
+import { SCHEMA_ID, SCHEMA_VERSION } from "./public/network-core.js";
 import { handleApiRequest } from "./api.js";
 import { handleMcpRequest } from "./mcp.js";
 
@@ -25,8 +26,9 @@ export default {
       if (request.method === "OPTIONS") return new Response(null, { status: 204, headers });
       if (!["GET", "HEAD"].includes(request.method)) return Response.json({ ok: false, error: "method_not_allowed" }, { status: 405, headers });
       // Health doubles as the machine-surface directory: clients discover the
-      // API version and MCP endpoint from the same liveness probe.
-      const body = JSON.stringify({ ok: true, service: packageMetadata.name, version: packageMetadata.version, schema: "network-planner-studio/design", schemaVersion: 3, api: "v1", mcp: "/mcp" });
+      // API version and MCP endpoint from the same liveness probe. Schema
+      // identity comes from the core model, never a second copy.
+      const body = JSON.stringify({ ok: true, service: packageMetadata.name, version: packageMetadata.version, schema: SCHEMA_ID, schemaVersion: SCHEMA_VERSION, api: "v1", mcp: "/mcp" });
       headers.set("Content-Type", "application/json; charset=utf-8");
       return new Response(request.method === "HEAD" ? null : body, { status: 200, headers });
     }
