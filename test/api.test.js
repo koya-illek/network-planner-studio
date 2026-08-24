@@ -56,7 +56,7 @@ test("the service directory describes every endpoint with release provenance", a
   assert.equal(body.version, packageMetadata.version);
   assert.equal(body.schema, SCHEMA_ID);
   assert.equal(body.schemaVersion, SCHEMA_VERSION);
-  assert.equal(body.endpoints.length, 9);
+  assert.equal(body.endpoints.length, 10);
 });
 
 test("machine responses carry the hardening set, no-store caching and noindex", async () => {
@@ -78,6 +78,7 @@ test("the OpenAPI description covers all operations at the released version", as
   for (const path of ["/api/v1/validate", "/api/v1/review", "/api/v1/route", "/api/v1/subnets/next", "/api/v1/site-range/suggest"]) {
     assert.ok(doc.paths[path]?.post, `${path} must be described`);
   }
+  assert.ok(doc.paths["/api/v1/example-design"]?.get, "the example design endpoint must be described");
   assert.ok(doc.components.schemas.DesignDocument, "the canonical design schema must be described");
 });
 
@@ -256,6 +257,28 @@ test("the directory points at the MCP surface and the schema artifact", async ()
   assert.equal(directory.mcp, "/mcp");
   assert.equal(directory.designSchema, "/api/v1/design-schema.json");
   assert.ok(directory.endpoints.some(entry => entry.path === "/api/v1/design-schema.json"));
+  assert.ok(directory.endpoints.some(entry => entry.path === "/api/v1/example-design"));
+});
+
+test("the example design endpoint serves a document that validates verbatim", async () => {
+  const response = await fetchApi("/api/v1/example-design");
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("Content-Type"), /application\/json/);
+  const example = await response.json();
+  assert.equal(example.name, "Illek example network");
+  assert.equal(example.topologyMode, "hub-spoke");
+  // The body is a usable design: submitting it unchanged passes validation.
+  const roundTrip = await postJson("/api/v1/validate", { design: example });
+  assert.equal(roundTrip.status, 200);
+  const { result } = await roundTrip.json();
+  assert.equal(result.valid, true);
+  assert.deepEqual(result.corrections, []);
+  const methods = await fetchApi("/api/v1/example-design", { method: "POST" });
+  assert.equal(methods.status, 405);
+  assert.equal(methods.headers.get("Allow"), "GET, HEAD, OPTIONS");
+  const head = await fetchApi("/api/v1/example-design", { method: "HEAD" });
+  assert.equal(head.status, 200);
+  assert.equal(await head.text(), "");
 });
 
 /* Site and VLAN planning over HTTP. */

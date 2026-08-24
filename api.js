@@ -8,7 +8,7 @@ import { machineResponseHeaders, machinePreflightHeaders } from "./headers.js";
 import {
   SCHEMA_ID, SCHEMA_VERSION, DesignValidationError, migrateDesign, validateDesign,
   reviewDesignIssues, designScore, shortestPath, nextSubnet, suggestSiteRange,
-  recommendSitePlan, recommendVlanPlan
+  recommendSitePlan, recommendVlanPlan, exampleDesign
 } from "./public/network-core.js";
 
 export const API_BODY_LIMIT_BYTES = 1024 * 1024;
@@ -239,6 +239,7 @@ function directory() {
     endpoints: [
       { method: "GET", path: "/api/v1/openapi.json", description: "OpenAPI 3.1 description of this API." },
       { method: "GET", path: "/api/v1/design-schema.json", description: "Standalone JSON Schema (draft 2020-12) of the canonical design document." },
+      { method: "GET", path: "/api/v1/example-design", description: "A complete, valid example design document (the workspace demo). Use it as a starting point for the compute endpoints." },
       { method: "POST", path: "/api/v1/validate", description: "Canonicalize a design against schema v3 and report hard validation errors, warnings and normalization corrections." },
       { method: "POST", path: "/api/v1/review", description: "Run the workspace design review: weighted score plus heuristic findings (overlaps, capacity, hub-and-spoke consistency)." },
       { method: "POST", path: "/api/v1/route", description: "Trace the shortest permitted inter-site path under a design's topology policy." },
@@ -351,6 +352,13 @@ function openapi() {
           summary: "Standalone JSON Schema of the canonical design document",
           description: `Draft 2020-12 JSON Schema for ${SCHEMA_ID} v${SCHEMA_VERSION}, usable with offline validators; mirrors components.schemas.DesignDocument.`,
           responses: jsonResponseFor({ type: "object" })
+        }
+      },
+      "/api/v1/example-design": {
+        get: {
+          summary: "Fetch the complete example design",
+          description: "A small, valid hub-and-spoke design document (the workspace demo). Its body passes /validate unchanged; edit it and submit it to any compute endpoint.",
+          responses: jsonResponseFor(designRef)
         }
       },
       "/api/v1/validate": {
@@ -618,6 +626,12 @@ export async function handleApiRequest(request) {
     if (url.pathname === "/api/v1/design-schema.json") {
       if (!["GET", "HEAD"].includes(method)) return notAllowed("GET, HEAD, OPTIONS");
       return headOr(jsonResponse(designSchema(), { contentType: "application/schema+json; charset=utf-8" }));
+    }
+    // The response body is itself a valid canonical design: schema validators
+    // and the compute endpoints accept it verbatim.
+    if (url.pathname === "/api/v1/example-design") {
+      if (!["GET", "HEAD"].includes(method)) return notAllowed("GET, HEAD, OPTIONS");
+      return headOr(jsonResponse(exampleDesign()));
     }
 
     const postedRoutes = {

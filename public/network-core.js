@@ -961,3 +961,69 @@ export function recommendVlanPlan({ sites = [], siteId, role = "other", devices 
     notes: "Recommended by the compatibility assistant.", siteCidr: site.cidr
   });
 }
+
+/*
+ * The canonical example design. It is both the workspace's "explore a
+ * complete example" starting point and the machine surfaces' bootstrap
+ * document, so the documented example can never drift from what
+ * validate/review/route actually accept. Entity ids are stable so examples
+ * can reference them; callers assign their own projectId.
+ */
+export function exampleDesign() {
+  const vlansFor = (siteCidr, specs) => specs.map(spec => {
+    const pool = defaultDhcpPool(spec.cidr, 1);
+    return createVlan({
+      id: spec.id, name: spec.name, vid: spec.vid, role: spec.role, devices: spec.devices,
+      cidr: spec.cidr, gateway: firstUsable(spec.cidr), dhcpEnabled: spec.role !== "servers",
+      reserved: 1, dhcpStart: pool.start, dhcpEnd: pool.end, notes: "", siteCidr
+    });
+  });
+  const hq = createSite({
+    id: "hq", name: "Cork HQ", type: "office", cidr: "10.20.0.0/16", devices: 180,
+    wan: "dual", growth: 30, x: 42, y: 40, topologyRole: "hub", hubId: null,
+    internetBreakout: "local", notes: "Primary network hub.",
+    vlans: vlansFor("10.20.0.0/16", [
+      { id: "hq-staff", name: "Staff", vid: 10, role: "users", devices: 100, cidr: "10.20.10.0/25" },
+      { id: "hq-voice", name: "Voice", vid: 20, role: "voice", devices: 80, cidr: "10.20.20.0/25" },
+      { id: "hq-guest", name: "Guest", vid: 30, role: "guest", devices: 120, cidr: "10.20.30.0/24" },
+      { id: "hq-mgmt", name: "Management", vid: 99, role: "management", devices: 22, cidr: "10.20.99.0/27" }
+    ])
+  });
+  const branch = createSite({
+    id: "branch", name: "Dublin office", type: "branch", cidr: "10.30.0.0/16", devices: 70,
+    wan: "single", growth: 30, x: 70, y: 20, topologyRole: "spoke", hubId: "hq",
+    internetBreakout: "hub", notes: "",
+    vlans: vlansFor("10.30.0.0/16", [
+      { id: "branch-staff", name: "Staff", vid: 10, role: "users", devices: 52, cidr: "10.30.10.0/26" },
+      { id: "branch-voice", name: "Voice", vid: 20, role: "voice", devices: 45, cidr: "10.30.20.0/26" },
+      { id: "branch-guest", name: "Guest", vid: 30, role: "guest", devices: 70, cidr: "10.30.30.0/25" }
+    ])
+  });
+  const cloud = createSite({
+    id: "cloud", name: "Azure production", type: "cloud", cidr: "10.80.0.0/16", devices: 40,
+    wan: "none", growth: 50, x: 42, y: 72, topologyRole: "spoke", hubId: "hq",
+    internetBreakout: "hub", notes: "",
+    vlans: vlansFor("10.80.0.0/16", [
+      { id: "cloud-apps", name: "Applications", vid: 40, role: "servers", devices: 28, cidr: "10.80.10.0/26" },
+      { id: "cloud-endpoints", name: "Private endpoints", vid: 50, role: "servers", devices: 18, cidr: "10.80.20.0/27" }
+    ])
+  });
+  const links = [
+    createLink({ id: "link-hq-branch", from: "hq", to: "branch", type: "vpn", resilience: "dual", routingType: "bgp", transitAllowed: true, defaultRoute: true, advertisedPrefixes: [], notes: "Primary branch path." }),
+    createLink({ id: "link-hq-cloud", from: "hq", to: "cloud", type: "vpn", resilience: "single", routingType: "bgp", transitAllowed: true, defaultRoute: false, advertisedPrefixes: [], notes: "Cloud application path." })
+  ];
+  return {
+    schema: SCHEMA_ID,
+    version: SCHEMA_VERSION,
+    projectId: "illek-example-network",
+    name: "Illek example network",
+    mode: "sample",
+    topologyMode: "hub-spoke",
+    policies: { spokeToSpoke: "via-hub", centralizedInspection: true, secondaryHubId: null },
+    flowPolicies: {},
+    assumptions: ["Cork HQ provides transit and centralized inspection."],
+    sites: [hq, branch, cloud],
+    links,
+    updatedAt: new Date().toISOString()
+  };
+}

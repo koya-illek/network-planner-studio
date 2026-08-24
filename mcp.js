@@ -7,6 +7,7 @@
 import packageMetadata from "./package.json" with { type: "json" };
 import { machineResponseHeaders, machinePreflightHeaders } from "./headers.js";
 import { HttpProblem, readJsonBody, opValidate, opReview, opRoute, opNextSubnet, opSuggestRange, opPlanSite, opPlanVlan } from "./api.js";
+import { exampleDesign } from "./public/network-core.js";
 
 const PROTOCOL_VERSION = "2025-06-18";
 const SUPPORTED_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26"];
@@ -111,6 +112,18 @@ const sitesInput = {
 };
 
 const TOOLS = [
+  tool(
+    "example_design",
+    "Fetch the complete example design",
+    "Return a small, valid hub-and-spoke network-planner-studio/design v3 document with stable ids. Start here when you need a concrete design to edit, then confirm edits with validate_design.",
+    { type: "object", properties: {} },
+    {
+      type: "object", required: ["design"],
+      properties: {
+        design: { type: "object", description: "A valid canonical design document: schema, version, sites (hub plus two spokes), links, policies." }
+      }
+    }
+  ),
   tool(
     "validate_design",
     "Validate an IPv4 network design",
@@ -247,6 +260,7 @@ const TOOLS = [
 
 function callTool(name, args = {}) {
   switch (name) {
+    case "example_design": return { design: exampleDesign() };
     case "validate_design": return opValidate(requireArg(args, "design"));
     case "review_design": return opReview(requireArg(args, "design"));
     case "find_route": return opRoute({
@@ -329,7 +343,7 @@ export async function handleMcpRequest(request) {
           protocolVersion: negotiated,
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: packageMetadata.name, title: "Network Planner Studio", version: packageMetadata.version },
-          instructions: "Stateless IPv4 planning tools over the network-planner-studio/design v3 model. Use validate_design after building a design and review_design for heuristic findings; plan_site and plan_vlan produce compatible identity-free plans you can merge into a design (assign ids first); next_subnet and suggest_site_range allocate addresses; find_route traces inter-site paths under topology policy."
+          instructions: "Stateless IPv4 planning tools over the network-planner-studio/design v3 model. example_design returns a valid starting document; use validate_design after building or editing a design and review_design for heuristic findings; plan_site and plan_vlan produce compatible identity-free plans you can merge into a design (assign ids first); next_subnet and suggest_site_range allocate addresses; find_route traces inter-site paths under topology policy."
         }, negotiated);
       case "ping":
         return rpcResult(id, {}, negotiated);

@@ -75,7 +75,7 @@ test("notifications are acknowledged with an empty 202", async () => {
 test("tools/list describes the planning tools with input and output schemas", async () => {
   const { body } = await rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" });
   const names = body.result.tools.map(entry => entry.name);
-  assert.deepEqual(names, ["validate_design", "review_design", "find_route", "plan_site", "plan_vlan", "next_subnet", "suggest_site_range"]);
+  assert.deepEqual(names, ["example_design", "validate_design", "review_design", "find_route", "plan_site", "plan_vlan", "next_subnet", "suggest_site_range"]);
   for (const entry of body.result.tools) {
     assert.equal(entry.inputSchema.type, "object");
     assert.equal(entry.outputSchema?.type, "object", `${entry.name} must declare its structured result shape`);
@@ -137,6 +137,23 @@ test("tools/call returns structured content for a valid design", async () => {
   assert.equal(typeof body.result.structuredContent.score, "number");
   assert.ok(body.result.structuredContent.summary.warnings >= 1);
 });
+
+test("the example design tool returns a valid bootstrap document", async () => {
+  const { body } = await rpc({ jsonrpc: "2.0", id: 26, method: "tools/call", params: { name: "example_design", arguments: {} } });
+  assert.notEqual(body.result.isError, true);
+  const example = body.result.structuredContent.design;
+  assert.equal(example.name, "Illek example network");
+  assert.equal(example.sites.length, 3);
+  // What the tool hands over must survive the validator untouched.
+  const checked = await callToolJson({ jsonrpc: "2.0", id: 27, method: "tools/call", params: { name: "validate_design", arguments: { design: example } } });
+  assert.equal(checked.valid, true);
+});
+
+async function callToolJson(payload) {
+  const { body } = await rpc(payload);
+  assert.notEqual(body.result.isError, true);
+  return body.result.structuredContent;
+}
 
 test("tools/call maps engine rejections to tool errors, not protocol errors", async () => {
   const { body } = await rpc({

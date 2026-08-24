@@ -23,12 +23,19 @@ test("the planning API validates and traces designs over HTTP", async ({ request
   const health = await request.get("/api/v1");
   expect(health.ok()).toBeTruthy();
   const directory = await health.json();
-  expect(directory.endpoints).toHaveLength(9);
+  expect(directory.endpoints).toHaveLength(10);
   expect(directory.mcp).toBe("/mcp");
   expect(directory.designSchema).toBe("/api/v1/design-schema.json");
 
   const validated = await request.post("/api/v1/validate", { data: { design } });
   expect((await validated.json()).result.valid).toBe(true);
+
+  const example = await request.get("/api/v1/example-design");
+  expect(example.ok()).toBeTruthy();
+  const exampleDesign = await example.json();
+  expect(exampleDesign.name).toBe("Illek example network");
+  const exampleCheck = await request.post("/api/v1/validate", { data: { design: exampleDesign } });
+  expect((await exampleCheck.json()).result.valid).toBe(true);
 
   const route = await request.post("/api/v1/route", { data: { design, from: "Dublin", to: "Cork HQ" } });
   const traced = await route.json();

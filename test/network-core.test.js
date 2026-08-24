@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  recommendSitePlan,recommendVlanPlan,
+  recommendSitePlan,recommendVlanPlan,exampleDesign,
   parseCidr,rangesOverlap,contains,endpointCapacity,prefixForDevices,nextSubnet,
   suggestSiteRange,isPrivateCidr,isPrivateRoutePrefix,shortestPath,migrateDesign,defaultDhcpPool,validHostInSubnet,parseRoutePrefix,validateGateway,validateDhcpPool,validateDesign,guardCsvCell,unguardCsvCell,parseCsvRows,intToIp,firstUsable,SCHEMA_ID,SCHEMA_VERSION
 } from "../public/network-core.js";
@@ -446,4 +446,27 @@ test("VLAN planning rejects unknown sites, roles and unallocatable ranges",()=>{
   const packed={id:"packed",name:"Packed",cidr:"10.99.0.0/30",
     vlans:[{id:"p1",name:"Transit",vid:90,role:"transit",devices:2,cidr:"10.99.0.0/31",gateway:"10.99.0.0",dhcpEnabled:false,reserved:1,dhcpStart:"",dhcpEnd:""}]};
   assert.throws(()=>recommendVlanPlan({sites:[packed],siteId:"packed",role:"other",devices:2}),/fit inside the site range/);
+});
+
+/* The canonical example design: one source for the workspace demo and the machine surfaces. */
+
+test("the example design is a valid canonical document with stable ids",()=>{
+  const example=exampleDesign();
+  assert.equal(example.schema,SCHEMA_ID);
+  assert.equal(example.version,SCHEMA_VERSION);
+  assert.equal(example.topologyMode,"hub-spoke");
+  assert.deepEqual(example.sites.map(site=>site.id),["hq","branch","cloud"]);
+  assert.equal(example.sites[0].topologyRole,"hub");
+  for(const site of example.sites.slice(1))assert.equal(site.hubId,"hq");
+  assert.deepEqual(example.links.map(link=>link.id),["link-hq-branch","link-hq-cloud"]);
+  const validation=validateDesign(migrateDesign(example,{strict:true}));
+  assert.deepEqual(validation.errors,[]);
+  assert.equal(validation.valid,true);
+});
+
+test("the example design is deterministic apart from its timestamp",()=>{
+  const first=exampleDesign(),second=exampleDesign();
+  const {updatedAt:_a,...rest}=first;
+  const {updatedAt:_b,...rest2}=second;
+  assert.deepEqual(rest,rest2);
 });

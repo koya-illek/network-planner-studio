@@ -1,4 +1,4 @@
-import {SCHEMA_ID,SCHEMA_VERSION,ENUMS,DesignValidationError,parseCidr,parseRoutePrefix,rangesOverlap,contains,firstUsable,endpointCapacity,defaultDhcpPool,validateGateway,validateDhcpPool,prefixForDevices,nextSubnet,nextAvailableVlanId,suggestSiteRange as suggestSiteRangeCore,recommendSitePlan as recommendSitePlanCore,recommendVlanPlan as recommendVlanPlanCore,reviewDesignIssues,designScore,defaultFlowPolicy,guardCsvCell,unguardCsvCell,parseCsvRows,shortestPath,migrateDesign,createSite,createVlan,createLink} from "./network-core.js";
+import {SCHEMA_ID,SCHEMA_VERSION,ENUMS,DesignValidationError,exampleDesign,parseCidr,parseRoutePrefix,rangesOverlap,contains,firstUsable,endpointCapacity,defaultDhcpPool,validateGateway,validateDhcpPool,prefixForDevices,nextSubnet,nextAvailableVlanId,suggestSiteRange as suggestSiteRangeCore,recommendSitePlan as recommendSitePlanCore,recommendVlanPlan as recommendVlanPlanCore,reviewDesignIssues,designScore,defaultFlowPolicy,guardCsvCell,unguardCsvCell,parseCsvRows,shortestPath,migrateDesign,createSite,createVlan,createLink} from "./network-core.js";
 
 const STORAGE_KEY = "network-planner-studio.v1";
 const LIBRARY_KEY = "network-planner-studio.projects.v1";
@@ -43,29 +43,11 @@ function blankState() {
   return {schema:SCHEMA_ID,version:SCHEMA_VERSION,projectId:uid(),name:"Untitled network",mode:null,topologyMode:"custom",policies:{spokeToSpoke:"via-hub",centralizedInspection:false,secondaryHubId:null},flowPolicies:{},assumptions:[],sites:[],links:[],updatedAt:new Date().toISOString()};
 }
 
-function sampleState() {
-  const hq=uid(), branch=uid(), cloud=uid();
-  return {
-    schema:SCHEMA_ID,version:SCHEMA_VERSION,projectId:uid(),name:"Illek example network",mode:"sample",topologyMode:"hub-spoke",policies:{spokeToSpoke:"via-hub",centralizedInspection:true,secondaryHubId:null},flowPolicies:{},assumptions:["Cork HQ provides transit and centralized inspection."],updatedAt:new Date().toISOString(),
-    sites:[
-      {id:hq,name:"Cork HQ",type:"office",cidr:"10.20.0.0/16",devices:180,wan:"dual",growth:30,x:42,y:40,topologyRole:"hub",hubId:null,internetBreakout:"local",notes:"Primary network hub.",vlans:[
-        vlan("Staff",10,"users",100,"10.20.10.0/25"),vlan("Voice",20,"voice",80,"10.20.20.0/25"),vlan("Guest",30,"guest",120,"10.20.30.0/24"),vlan("Management",99,"management",22,"10.20.99.0/27")
-      ]},
-      {id:branch,name:"Dublin office",type:"branch",cidr:"10.30.0.0/16",devices:70,wan:"single",growth:30,x:70,y:20,topologyRole:"spoke",hubId:hq,internetBreakout:"hub",notes:"",vlans:[
-        vlan("Staff",10,"users",52,"10.30.10.0/26"),vlan("Voice",20,"voice",45,"10.30.20.0/26"),vlan("Guest",30,"guest",70,"10.30.30.0/25")
-      ]},
-      {id:cloud,name:"Azure production",type:"cloud",cidr:"10.80.0.0/16",devices:40,wan:"none",growth:50,x:42,y:72,topologyRole:"spoke",hubId:hq,internetBreakout:"hub",notes:"",vlans:[
-        vlan("Applications",40,"servers",28,"10.80.10.0/26"),vlan("Private endpoints",50,"servers",18,"10.80.20.0/27")
-      ]}
-    ],
-    links:[
-      {id:uid(),from:hq,to:branch,type:"vpn",resilience:"dual",routingType:"bgp",transitAllowed:true,defaultRoute:true,advertisedPrefixes:[],notes:"Primary branch path."},
-      {id:uid(),from:hq,to:cloud,type:"vpn",resilience:"single",routingType:"bgp",transitAllowed:true,defaultRoute:false,advertisedPrefixes:[],notes:"Cloud application path."}
-    ]
-  };
+// The example design is built and validated by the core model, so the
+// workspace demo and the machine surfaces share one document.
+function sampleState(){
+  return {...exampleDesign(),projectId:uid()};
 }
-
-function vlan(name,vid,role,devices,cidr){const pool=defaultDhcpPool(cidr,1);return createVlan({id:uid(),name,vid,role,devices,cidr,gateway:firstUsable(cidr),dhcpEnabled:role!=="servers",reserved:1,dhcpStart:pool.start,dhcpEnd:pool.end,notes:"",siteCidr:"10.0.0.0/8"})}
 
 function suggestSiteRange(devices=50){
   return suggestSiteRangeCore(state.sites.map(s=>s.cidr).filter(Boolean),devices);
