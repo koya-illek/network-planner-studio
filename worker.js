@@ -1,6 +1,7 @@
 import packageMetadata from "./package.json" with { type: "json" };
 import { SECURITY_HEADERS } from "./headers.js";
 import { handleApiRequest } from "./api.js";
+import { handleMcpRequest } from "./mcp.js";
 
 export { SECURITY_HEADERS };
 
@@ -12,8 +13,9 @@ export default {
     const redirect = redirectForRequest(request);
     if (redirect) return redirect;
 
-    // Machine surface: versioned REST planning API. Stateless compute over
-    // the canonical core model.
+    // Machine surfaces: versioned REST planning API and the MCP tool server.
+    // Both are stateless compute over the canonical core model.
+    if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) return handleMcpRequest(request);
     if (url.pathname === "/api/v1" || url.pathname.startsWith("/api/v1/")) return handleApiRequest(request);
 
     if (url.pathname === "/api/health") {

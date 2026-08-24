@@ -13,3 +13,23 @@ export const SECURITY_HEADERS = Object.freeze({
   "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
   "Strict-Transport-Security": "max-age=31536000; includeSubDomains; preload"
 });
+
+/*
+ * Machine surfaces (/api/v1, /mcp) are public stateless compute: they add
+ * no-store caching, noindex and wildcard CORS to the hardened base set.
+ */
+export function machineResponseHeaders() {
+  const headers = new Headers(SECURITY_HEADERS);
+  headers.set("Cache-Control", "no-store");
+  headers.set("X-Robots-Tag", "noindex, nofollow");
+  headers.set("Access-Control-Allow-Origin", "*");
+  return headers;
+}
+
+export function machinePreflightHeaders() {
+  const headers = machineResponseHeaders();
+  headers.set("Access-Control-Allow-Methods", "GET, HEAD, POST, OPTIONS");
+  headers.set("Access-Control-Allow-Headers", "Content-Type");
+  headers.set("Access-Control-Max-Age", "86400");
+  return headers;
+}

@@ -4,7 +4,7 @@
  * are bounded and validated at this boundary; the engine stays pure.
  */
 import packageMetadata from "./package.json" with { type: "json" };
-import { SECURITY_HEADERS } from "./headers.js";
+import { machineResponseHeaders, machinePreflightHeaders } from "./headers.js";
 import {
   SCHEMA_ID, SCHEMA_VERSION, DesignValidationError, migrateDesign, validateDesign,
   reviewDesignIssues, designScore, shortestPath, nextSubnet, suggestSiteRange
@@ -12,7 +12,7 @@ import {
 
 export const API_BODY_LIMIT_BYTES = 1024 * 1024;
 
-class HttpProblem extends Error {
+export class HttpProblem extends Error {
   constructor(status, code, message) {
     super(message);
     this.status = status;
@@ -20,13 +20,7 @@ class HttpProblem extends Error {
   }
 }
 
-const baseHeaders = () => {
-  const headers = new Headers(SECURITY_HEADERS);
-  headers.set("Cache-Control", "no-store");
-  headers.set("X-Robots-Tag", "noindex, nofollow");
-  headers.set("Access-Control-Allow-Origin", "*");
-  return headers;
-};
+const baseHeaders = () => machineResponseHeaders();
 
 function jsonResponse(payload, { status = 200, headers = new Headers() } = {}) {
   const finalHeaders = baseHeaders();
@@ -44,25 +38,21 @@ function problemResponse(problem, extra = {}) {
 }
 
 function preflight() {
-  const headers = baseHeaders();
-  headers.set("Access-Control-Allow-Methods", "GET, HEAD, POST, OPTIONS");
-  headers.set("Access-Control-Allow-Headers", "Content-Type");
-  headers.set("Access-Control-Max-Age", "86400");
-  return new Response(null, { status: 204, headers });
+  return new Response(null, { status: 204, headers: machinePreflightHeaders() });
 }
 
-async function readJsonBody(request) {
+export async function readJsonBody(request, { limitBytes = API_BODY_LIMIT_BYTES } = {}) {
   const contentType = String(request.headers.get("content-type") || "");
   if (!contentType.toLowerCase().startsWith("application/json")) {
     throw new HttpProblem(415, "unsupported_media_type", "Send the request body as application/json.");
   }
   const declaredLength = Number(request.headers.get("content-length") || 0);
-  if (declaredLength > API_BODY_LIMIT_BYTES) {
-    throw new HttpProblem(413, "payload_too_large", `Request bodies are limited to ${API_BODY_LIMIT_BYTES} bytes.`);
+  if (declaredLength > limitBytes) {
+    throw new HttpProblem(413, "payload_too_large", `Request bodies are limited to ${limitBytes} bytes.`);
   }
   const text = await request.text();
-  if (text.length > API_BODY_LIMIT_BYTES) {
-    throw new HttpProblem(413, "payload_too_large", `Request bodies are limited to ${API_BODY_LIMIT_BYTES} bytes.`);
+  if (text.length > limitBytes) {
+    throw new HttpProblem(413, "payload_too_large", `Request bodies are limited to ${limitBytes} bytes.`);
   }
   if (!text.trim()) throw new HttpProblem(400, "empty_body", "The request body must contain a JSON document.");
   try {
