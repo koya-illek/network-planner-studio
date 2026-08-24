@@ -158,11 +158,19 @@ function focusKeeper(){
   return null;
 }
 function restoreFocus(keeper){
-  if(!keeper||document.activeElement!==document.body)return;
+  if(!keeper)return;
+  // A live, rendered element keeps focus undisturbed. Body means focus was
+  // lost; a now-hidden element means the browser has not yet processed the
+  // blur (it defers until event dispatch ends), so rehome in both cases.
+  const active=document.activeElement;
+  if(active&&active!==document.body&&active.offsetParent)return;
   const target=$(keeper);
   if(target){
     target.focus({preventScroll:true});
-    if(document.activeElement===document.body&&!target.offsetParent){
+    // The keeper may be unrenderable (its drawer closed, its row filtered
+    // out): whether the browser has already dropped focus to <body> or still
+    // reports the dying element, the opener takes over.
+    if(!target.offsetParent&&(document.activeElement===document.body||document.activeElement===target)){
       const opener=target.closest("#sites-panel")?$("#mobile-sites-button"):null;
       if(opener&&opener.offsetParent)opener.focus({preventScroll:true});
     }
