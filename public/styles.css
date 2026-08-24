@@ -98,7 +98,7 @@ input:focus,select:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(77,1
 .proposal-reasons{margin:13px 0 0;padding:11px 0 0 17px;border-top:1px solid var(--line);color:#a9b9ca;font-size:10px;line-height:1.6}
 @media(max-width:720px){.recommend-button{padding:9px}.recommend-dialog .proposal-grid{grid-template-columns:1fr 1fr}}
 .mobile-only{display:none!important}
-.zoom-controls{display:flex;gap:3px}.zoom-controls button{border:1px solid var(--line);background:var(--cream);color:var(--ink);min-width:30px;height:30px;border-radius:7px;font-size:10px;cursor:pointer}
+.zoom-controls{display:flex;gap:3px;align-items:center}.zoom-controls button{border:1px solid var(--line);background:var(--cream);color:var(--ink);min-width:30px;height:30px;border-radius:7px;font-size:10px;cursor:pointer}#zoom-level{min-width:38px;text-align:center;font:400 10px "DM Mono";color:var(--muted)}
 textarea{display:block;width:100%;min-height:76px;resize:vertical;border:1px solid var(--line);border-radius:9px;padding:11px;background:#081523;color:var(--ink);margin-top:6px;font:12px inherit;outline:none}
 textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(77,163,255,.2)}
 .check-label{display:flex!important;align-items:center;gap:9px;padding:9px;border:1px solid var(--line);border-radius:9px}.check-label input{width:auto;margin:0}

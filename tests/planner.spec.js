@@ -701,3 +701,31 @@ test("a large imported design collapses the site tree and answers filtering", as
   await expect(page.locator(".site-row-select")).toHaveCount(45);
   await expect(page.locator(".vlan-row")).toHaveCount(2);
 });
+
+test("the focused canvas pans and zooms by keyboard with a live readout", async ({ page }) => {
+  await page.locator("#canvas").focus();
+  const transformBefore = await page.locator("#node-layer").evaluate(el => el.style.transform || "");
+  await page.keyboard.press("ArrowLeft");
+  const transformAfter = await page.locator("#node-layer").evaluate(el => el.style.transform);
+  expect(transformAfter).not.toBe(transformBefore);
+  expect(transformAfter).toContain("translate(60px");
+
+  await page.keyboard.press("+");
+  await expect(page.locator("#zoom-level")).toHaveText("110%");
+  for (let i = 0; i < 12; i++) await page.keyboard.press("-");
+  await expect(page.locator("#zoom-level")).toHaveText("25%");
+  // The clamp holds: extra minus presses must not shrink further.
+  await page.keyboard.press("-");
+  await expect(page.locator("#zoom-level")).toHaveText("25%");
+  await page.keyboard.press("0");
+  await expect(page.locator("#zoom-level")).toHaveText("100%");
+});
+
+test("zoom buttons honour the widened range and update the readout", async ({ page }) => {
+  for (let i = 0; i < 8; i++) await page.locator("#zoom-in").click();
+  await expect(page.locator("#zoom-level")).toHaveText("180%");
+  for (let i = 0; i < 15; i++) await page.locator("#zoom-out").click();
+  await expect(page.locator("#zoom-level")).toHaveText("30%");
+  await page.locator("#zoom-fit").click();
+  await expect(page.locator("#zoom-level")).toHaveText("100%");
+});

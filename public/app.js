@@ -291,6 +291,7 @@ function renderCanvas(){
   if($("#topology-view").hidden||$("#workspace").classList.contains("hidden")){canvasDirty=true;return}
   canvasDirty=false;
   const layer=$("#node-layer"),svg=$("#link-layer"),geom=canvasGeometry();
+  layer.innerHTML="";svg.innerHTML="";
   svg.setAttribute("viewBox",`0 0 ${geom.w} ${geom.h}`);
   // Endpoint lookup through a Map: scanning every site per link endpoint
   // made dense topologies pay O(links x sites) per full pass.
@@ -639,9 +640,9 @@ document.addEventListener("click",e=>{
   if(e.target.closest("#apply-recommendation"))return applyRecommendation();
   if(e.target.closest("#hub-spoke-button"))return openHubDialog();
   if(e.target.closest("#mobile-sites-button")){setMobileSites(!$(".tool-panel").classList.contains("mobile-open"));return}
-  if(e.target.closest("#zoom-in")){canvasZoom=Math.min(1.5,canvasZoom+.1);return applyCanvasZoom()}
-  if(e.target.closest("#zoom-out")){canvasZoom=Math.max(.7,canvasZoom-.1);return applyCanvasZoom()}
-  if(e.target.closest("#zoom-fit")){canvasZoom=1;canvasPan={x:0,y:0};return applyCanvasZoom()}
+  if(e.target.closest("#zoom-in"))return setZoom(canvasZoom+ZOOM_STEP);
+  if(e.target.closest("#zoom-out"))return setZoom(canvasZoom-ZOOM_STEP);
+  if(e.target.closest("#zoom-fit")){canvasPan={x:0,y:0};return setZoom(1)}
   const startButton=e.target.closest("[data-start]");if(startButton)return start(startButton.dataset.start);
   if(e.target.closest("#add-site-top,#add-site-side,#empty-add-site"))return openSiteDialog();
   const add=e.target.closest("[data-add-vlan],[data-inspector-add-vlan]");if(add)return openVlanDialog(add.dataset.addVlan||add.dataset.inspectorAddVlan);
@@ -685,6 +686,15 @@ document.addEventListener("keydown",e=>{
     const redo=e.key.toLowerCase()==="y"||(e.key.toLowerCase()==="z"&&e.shiftKey);
     e.preventDefault();
     return restoreHistory(redo?redoStack:undoStack,redo?undoStack:redoStack);
+  }
+  // The focused canvas answers pan and zoom keys: navigating a dense
+  // import must not require landing a pointer or a node.
+  if(e.target===$("#canvas")){
+    const pans={ArrowLeft:[60,0],ArrowRight:[-60,0],ArrowUp:[0,60],ArrowDown:[0,-60]},step=pans[e.key];
+    if(step){e.preventDefault();return panCanvas(step[0],step[1])}
+    if(e.key==="+"||e.key==="="){e.preventDefault();return setZoom(canvasZoom+ZOOM_STEP)}
+    if(e.key==="-"||e.key==="_"){e.preventDefault();return setZoom(canvasZoom-ZOOM_STEP)}
+    if(e.key==="0"){e.preventDefault();canvasPan={x:0,y:0};return setZoom(1)}
   }
   const node=e.target.closest?.(".topology-node"),row=e.target.closest?.(".site-row,.vlan-row"),hit=e.target.closest?.(".link-hit");
   if(node&&e.target===node&&["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(e.key)){
@@ -759,7 +769,13 @@ function animateTrace(linkId){
   let i=0;const tick=()=>{$("#trace-detail").textContent=steps[i];$$(".topology-node").forEach(n=>n.classList.toggle("trace-active",n.dataset.site===(i<2?a.id:b.id)));i++;if(i<steps.length)traceTimer=setTimeout(tick,900)};tick();
 }
 function stopTrace(){clearTimeout(traceTimer);traceTimer=null;$("#trace-bar").classList.add("hidden");$("#trace-particle")?.remove();$$(".route-particle").forEach(p=>p.remove());$$(".topology-node").forEach(n=>n.classList.remove("trace-active"))}
-function applyCanvasZoom(){for(const el of [$("#link-layer"),$("#node-layer")]){el.style.transform=`translate(${canvasPan.x}px,${canvasPan.y}px) scale(${canvasZoom})`;el.style.transformOrigin="center center"}}
+// Dense imports need real navigation range: 70-150% hid most of a
+// 1200-node topology behind its own cards.
+const ZOOM_MIN=.25,ZOOM_MAX=2,ZOOM_STEP=.1;
+function clampZoom(zoom){return Math.max(ZOOM_MIN,Math.min(ZOOM_MAX,zoom))}
+function setZoom(zoom){canvasZoom=clampZoom(zoom);applyCanvasZoom()}
+function applyCanvasZoom(){for(const el of [$("#link-layer"),$("#node-layer")]){el.style.transform=`translate(${canvasPan.x}px,${canvasPan.y}px) scale(${canvasZoom})`;el.style.transformOrigin="center center"}$("#zoom-level").textContent=`${Math.round(canvasZoom*100)}%`}
+function panCanvas(dx,dy){canvasPan={x:canvasPan.x+dx,y:canvasPan.y+dy};applyCanvasZoom()}
 
 function capturePointer(e){try{e.currentTarget.setPointerCapture(e.pointerId)}catch{}}
 $("#canvas").addEventListener("pointerdown",e=>{
@@ -784,8 +800,7 @@ $("#canvas").addEventListener("pointermove",e=>{
   if(activePointers.has(e.pointerId))activePointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
   if(pinch&&activePointers.size>=2){
     const [a,b]=[...activePointers.values()].slice(0,2),dist=Math.hypot(a.x-b.x,a.y-b.y)||1;
-    canvasZoom=Math.max(.7,Math.min(1.5,pinch.zoom*dist/pinch.dist));
-    return applyCanvasZoom();
+    return setZoom(pinch.zoom*dist/pinch.dist);
   }
   if(panDrag){canvasPan={x:panDrag.x+e.clientX-panDrag.startX,y:panDrag.y+e.clientY-panDrag.startY};applyCanvasZoom();return}
   if(!drag)return;const canvas=$("#canvas"),dx=(e.clientX-drag.startX)/canvasZoom,dy=(e.clientY-drag.startY)/canvasZoom;if(Math.abs(dx)+Math.abs(dy)>3)drag.moved=true;
@@ -817,7 +832,7 @@ function releasePointer(e,commit){
 }
 $("#canvas").addEventListener("pointerup",e=>releasePointer(e,true));
 $("#canvas").addEventListener("pointercancel",e=>releasePointer(e,false));
-$("#canvas").addEventListener("wheel",e=>{if(!e.ctrlKey)return;e.preventDefault();canvasZoom=Math.max(.7,Math.min(1.5,canvasZoom+(e.deltaY<0?.1:-.1)));applyCanvasZoom()},{passive:false});
+$("#canvas").addEventListener("wheel",e=>{if(!e.ctrlKey)return;e.preventDefault();setZoom(canvasZoom+(e.deltaY<0?ZOOM_STEP:-ZOOM_STEP))},{passive:false});
 let resizeFrame=null;window.addEventListener("resize",()=>{stopTrace();cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(()=>{const keeper=focusKeeper();renderCanvas();restoreFocus(keeper)})});
 // A debounced save must not die with the tab: flush it when the page goes
 // away, and when it is only backgrounded (mobile may never fire pagehide).
