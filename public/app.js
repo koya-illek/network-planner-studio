@@ -323,12 +323,25 @@ function select(entity){
   selected=entity;
   const sid=entity?.type==="site"?entity.id:entity?.type==="vlan"?findVlan(entity.id)?.site.id:null;
   // A chosen site must reveal its networks even in a collapsed tree.
-  if(sid&&state.sites.length>TREE_EXPAND_LIMIT)expandedSites.add(sid);
+  const needsReveal=Boolean(sid)&&state.sites.length>TREE_EXPAND_LIMIT&&!expandedSites.has(sid);
+  if(needsReveal)expandedSites.add(sid);
   const keeper=focusKeeper();
-  renderSiteList();
+  // When the affected rows are already on screen, selection is two class
+  // toggles; a collapsed branch or a missing row needs one real rebuild.
+  if(needsReveal||!syncTreeSelection())renderSiteList();
   for(const node of $$(".topology-node"))node.classList.toggle("selected",node.dataset.site===sid);
   renderInspector();
   restoreFocus(keeper);
+}
+function syncTreeSelection(){
+  const root=$("#site-list");
+  for(const el of root.querySelectorAll(".site-tree .selected")){el.classList.remove("selected");el.setAttribute("aria-pressed","false")}
+  const target=!selected?null:selected.type==="site"
+    ?root.querySelector(`.site-row-select[data-site="${CSS.escape(selected.id)}"]`)
+    :root.querySelector(`.vlan-row[data-vlan="${CSS.escape(selected.id)}"]`);
+  if(!target)return false;
+  target.classList.add("selected");target.setAttribute("aria-pressed","true");
+  return true;
 }
 
 function renderInspector(){

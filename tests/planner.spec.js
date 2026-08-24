@@ -690,6 +690,13 @@ test("a large imported design collapses the site tree and answers filtering", as
   // Selecting a node reveals exactly that branch.
   await page.locator(".topology-node").nth(7).click();
   await expect(page.locator(".vlan-row")).toHaveCount(2);
+  await expect(page.locator(".site-row-select[data-site=\"s7\"]")).toHaveAttribute("aria-pressed", "true");
+  // A selection inside an already-open branch stays surgical: the tree keeps
+  // its DOM identity instead of rebuilding every row per click.
+  await page.evaluate(() => { document.querySelector(".site-row-select[data-site=\"s7\"]").dataset.selectionProbe = "kept"; });
+  await page.locator(".vlan-row[data-vlan=\"s7-v2\"]").click();
+  await expect(page.locator(".vlan-row[data-vlan=\"s7-v2\"]")).toHaveAttribute("aria-pressed", "true");
+  expect(await page.locator(".site-row-select[data-site=\"s7\"]").getAttribute("data-selection-probe")).toBe("kept");
   // The filter searches every site regardless of collapse state.
   await page.locator("#site-filter").fill("Scanner net 42");
   await expect(page.locator("#site-filter-count")).toHaveText("1 of 45 sites match");
