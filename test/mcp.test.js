@@ -138,6 +138,12 @@ test("tools/call returns structured content for a valid design", async () => {
   assert.ok(body.result.structuredContent.summary.warnings >= 1);
 });
 
+async function callToolJson(payload) {
+  const { body } = await rpc(payload);
+  assert.notEqual(body.result.isError, true);
+  return body.result.structuredContent;
+}
+
 test("the example design tool returns a valid bootstrap document", async () => {
   const { body } = await rpc({ jsonrpc: "2.0", id: 26, method: "tools/call", params: { name: "example_design", arguments: {} } });
   assert.notEqual(body.result.isError, true);
@@ -148,12 +154,6 @@ test("the example design tool returns a valid bootstrap document", async () => {
   const checked = await callToolJson({ jsonrpc: "2.0", id: 27, method: "tools/call", params: { name: "validate_design", arguments: { design: example } } });
   assert.equal(checked.valid, true);
 });
-
-async function callToolJson(payload) {
-  const { body } = await rpc(payload);
-  assert.notEqual(body.result.isError, true);
-  return body.result.structuredContent;
-}
 
 test("tools/call maps engine rejections to tool errors, not protocol errors", async () => {
   const { body } = await rpc({
