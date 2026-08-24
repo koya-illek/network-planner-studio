@@ -23,7 +23,9 @@ test("the planning API validates and traces designs over HTTP", async ({ request
   const health = await request.get("/api/v1");
   expect(health.ok()).toBeTruthy();
   const directory = await health.json();
-  expect(directory.endpoints).toHaveLength(6);
+  expect(directory.endpoints).toHaveLength(7);
+  expect(directory.mcp).toBe("/mcp");
+  expect(directory.designSchema).toBe("/api/v1/design-schema.json");
 
   const validated = await request.post("/api/v1/validate", { data: { design } });
   expect((await validated.json()).result.valid).toBe(true);
@@ -32,6 +34,15 @@ test("the planning API validates and traces designs over HTTP", async ({ request
   const traced = await route.json();
   expect(traced.result.reachable).toBe(true);
   expect(traced.result.hops).toEqual(["Dublin", "Cork HQ"]);
+});
+
+test("the design schema artifact validates over HTTP", async ({ request }) => {
+  const response = await request.get("/api/v1/design-schema.json");
+  expect(response.ok()).toBeTruthy();
+  expect(response.headers()["content-type"]).toContain("application/schema+json");
+  const schema = await response.json();
+  expect(schema.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
+  expect(schema.properties.sites.items.required).toEqual(["id", "cidr"]);
 });
 
 test("the MCP handshake works against the dev worker", async ({ request }) => {
@@ -48,6 +59,10 @@ test("the MCP handshake works against the dev worker", async ({ request }) => {
     data: { jsonrpc: "2.0", id: 2, method: "tools/list" }
   })).json();
   expect(listed.result.tools.map(entry => entry.name)).toContain("review_design");
+  for (const entry of listed.result.tools) {
+    expect(entry.annotations.readOnlyHint).toBe(true);
+    expect(entry.annotations.openWorldHint).toBe(false);
+  }
 
   const reviewed = await (await request.post("/mcp", {
     headers: { "Content-Type": "application/json" },

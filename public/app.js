@@ -91,7 +91,9 @@ function pushHistory(){
 }
 function reviveDesign(raw){try{return migrateDesign(raw)}catch{return migrateDesign(raw,{strict:false})}}
 function restoreHistory(source,target){
-  if(!source.length)return;target.push(JSON.stringify(state));state=reviveDesign(JSON.parse(source.pop()));selected=null;nudgeBurst={siteId:null,at:0};expandedSites.clear();saveState();render();updateHistoryButtons();
+  // Expansions survive undo: rolling back an edit must not also collapse
+  // the branch the user is working in.
+  if(!source.length)return;target.push(JSON.stringify(state));state=reviveDesign(JSON.parse(source.pop()));selected=null;nudgeBurst={siteId:null,at:0};saveState();render();updateHistoryButtons();
 }
 function updateHistoryButtons(){
   $("#undo-button").disabled=!undoStack.length;$("#redo-button").disabled=!redoStack.length;
@@ -219,7 +221,7 @@ function renderSiteList(){
   for(const site of state.sites){
     if(!siteMatchesFilter(site,query))continue;
     shown++;
-    const wrap=document.createElement("div");wrap.className="site-tree";wrap.dataset.siteContainer=site.id;
+    const wrap=document.createElement("div");wrap.className="site-tree";
     const openVlans=!collapse||expandedSites.has(site.id)||Boolean(query);
     const vlanRows=openVlans?site.vlans.map(v=>`<div class="vlan-row ${selected?.type==="vlan"&&selected.id===v.id?"selected":""}" data-vlan="${v.id}" data-parent="${site.id}" role="button" tabindex="0" aria-pressed="${selected?.type==="vlan"&&selected.id===v.id}"><i class="vlan-dot ${roleClass(v.role)}" aria-hidden="true"></i><span>${escapeHtml(v.name)} · ${v.vid}</span><code>${escapeHtml(v.cidr)}</code></div>`).join(""):"";
     wrap.innerHTML=`<div class="site-row ${selected?.type==="site"&&selected.id===site.id?"selected":""}">
