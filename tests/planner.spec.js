@@ -668,3 +668,36 @@ test("a named design with no sites yet stays reachable from home", async ({ page
   await cont.click();
   await expect(page.locator("#workspace")).toBeVisible();
 });
+
+test("a large imported design collapses the site tree and answers filtering", async ({ page }) => {
+  await page.evaluate(() => {
+    const sites = [], links = [];
+    for (let i = 0; i < 45; i++) {
+      const id = `s${i}`;
+      sites.push({ id, name: `Depot ${String(i).padStart(2, "0")}`, type: "warehouse", cidr: `10.${i}.0.0/24`, devices: 40, wan: "single", growth: 30, x: 4 + (i % 8) * 11.5, y: 4 + Math.floor(i / 8) * 17, topologyRole: i === 0 ? "hub" : "spoke", hubId: i === 0 ? null : "s0", internetBreakout: "local", notes: "", vlans: [
+        { id: `${id}-v1`, name: "Floor", vid: 10, role: "users", devices: 20, cidr: `10.${i}.0.0/26`, gateway: `10.${i}.0.1`, dhcpEnabled: true, reserved: 1, dhcpStart: "", dhcpEnd: "", notes: "" },
+        { id: `${id}-v2`, name: `Scanner net ${i}`, vid: 50, role: "iot", devices: 10, cidr: `10.${i}.0.64/26`, gateway: `10.${i}.0.65`, dhcpEnabled: false, reserved: 1, dhcpStart: "", dhcpEnd: "", notes: "" }
+      ] });
+    }
+    const design = { schema: "network-planner-studio/design", version: 3, projectId: "big", name: "Depot fleet", mode: "imported", topologyMode: "custom", policies: { spokeToSpoke: "via-hub", centralizedInspection: false, secondaryHubId: null }, flowPolicies: {}, assumptions: [], sites, links: [{ id: "l1", from: "s0", to: "s1", type: "vpn", resilience: "single", routingType: "static", transitAllowed: true, defaultRoute: false, advertisedPrefixes: [], notes: "" }], updatedAt: new Date().toISOString() };
+    localStorage.setItem("network-planner-studio.v1", JSON.stringify(design));
+  });
+  await page.reload();
+  await expect(page.locator("#workspace")).toBeVisible();
+  // Above the expansion threshold only site rows render until asked for.
+  await expect(page.locator(".site-row-select")).toHaveCount(45);
+  await expect(page.locator(".vlan-row")).toHaveCount(0);
+  // Selecting a node reveals exactly that branch.
+  await page.locator(".topology-node").nth(7).click();
+  await expect(page.locator(".vlan-row")).toHaveCount(2);
+  // The filter searches every site regardless of collapse state.
+  await page.locator("#site-filter").fill("Scanner net 42");
+  await expect(page.locator("#site-filter-count")).toHaveText("1 of 45 sites match");
+  await expect(page.locator(".site-tree")).toHaveCount(1);
+  await expect(page.locator(".site-tree").locator(".vlan-row")).toHaveCount(2);
+  await expect(page.locator(".topology-node")).toHaveCount(45);
+  // Clearing restores the collapsed overview.
+  await page.locator("#site-filter").fill("");
+  await expect(page.locator(".site-row-select")).toHaveCount(45);
+  await expect(page.locator(".vlan-row")).toHaveCount(2);
+});

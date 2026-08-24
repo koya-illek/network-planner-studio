@@ -91,7 +91,7 @@ function pushHistory(){
 }
 function reviveDesign(raw){try{return migrateDesign(raw)}catch{return migrateDesign(raw,{strict:false})}}
 function restoreHistory(source,target){
-  if(!source.length)return;target.push(JSON.stringify(state));state=reviveDesign(JSON.parse(source.pop()));selected=null;nudgeBurst={siteId:null,at:0};saveState();render();updateHistoryButtons();
+  if(!source.length)return;target.push(JSON.stringify(state));state=reviveDesign(JSON.parse(source.pop()));selected=null;nudgeBurst={siteId:null,at:0};expandedSites.clear();saveState();render();updateHistoryButtons();
 }
 function updateHistoryButtons(){
   $("#undo-button").disabled=!undoStack.length;$("#redo-button").disabled=!redoStack.length;
@@ -122,7 +122,7 @@ function setMobileSites(open){
 function start(mode){
   if(mode==="sample") state=sampleState();
   else {state=blankState();state.mode=mode}
-  undoStack=[];redoStack=[];nudgeBurst={siteId:null,at:0};updateHistoryButtons();
+  undoStack=[];redoStack=[];nudgeBurst={siteId:null,at:0};expandedSites.clear();updateHistoryButtons();
   saveState();window.scrollTo({top:0,left:0,behavior:"auto"});$("#welcome").classList.add("hidden");$("#workspace").classList.remove("hidden");render();
   if(mode!=="sample") openSiteDialog();
 }
@@ -211,18 +211,42 @@ function currentView(){return $(".view.active")?.id.replace("-view","")||"topolo
 
 function renderSiteList(){
   const root=$("#site-list");root.innerHTML="";
+  // Beyond the expansion threshold the tree collapses to site rows: a
+  // 1200-site import must not paste thousands of VLAN rows into the panel.
+  // The filter searches everything regardless of collapse state.
+  const query=siteFilter.trim().toLowerCase(),collapse=state.sites.length>TREE_EXPAND_LIMIT;
+  let shown=0;
   for(const site of state.sites){
-    const wrap=document.createElement("div");wrap.className="site-tree";
+    if(!siteMatchesFilter(site,query))continue;
+    shown++;
+    const wrap=document.createElement("div");wrap.className="site-tree";wrap.dataset.siteContainer=site.id;
+    const openVlans=!collapse||expandedSites.has(site.id)||Boolean(query);
+    const vlanRows=openVlans?site.vlans.map(v=>`<div class="vlan-row ${selected?.type==="vlan"&&selected.id===v.id?"selected":""}" data-vlan="${v.id}" data-parent="${site.id}" role="button" tabindex="0" aria-pressed="${selected?.type==="vlan"&&selected.id===v.id}"><i class="vlan-dot ${roleClass(v.role)}" aria-hidden="true"></i><span>${escapeHtml(v.name)} · ${v.vid}</span><code>${escapeHtml(v.cidr)}</code></div>`).join(""):"";
     wrap.innerHTML=`<div class="site-row ${selected?.type==="site"&&selected.id===site.id?"selected":""}">
       <button class="site-row-select" data-site="${site.id}" type="button" aria-pressed="${selected?.type==="site"&&selected.id===site.id}"><span class="site-symbol">${TYPE_ICONS[site.type]||"ST"}</span><span class="site-row-text"><strong>${escapeHtml(site.name)}</strong><small>${escapeHtml(site.cidr)}</small></span></button>
       <button class="add-vlan-mini" data-add-vlan="${site.id}" type="button" aria-label="Add VLAN to ${escapeHtml(site.name)}">+</button></div>
-      <div class="vlan-list">${site.vlans.map(v=>`<div class="vlan-row ${selected?.type==="vlan"&&selected.id===v.id?"selected":""}" data-vlan="${v.id}" data-parent="${site.id}" role="button" tabindex="0" aria-pressed="${selected?.type==="vlan"&&selected.id===v.id}"><i class="vlan-dot ${roleClass(v.role)}" aria-hidden="true"></i><span>${escapeHtml(v.name)} · ${v.vid}</span><code>${escapeHtml(v.cidr)}</code></div>`).join("")}</div>`;
+      ${vlanRows?`<div class="vlan-list">${vlanRows}</div>`:""}`;
     root.append(wrap);
   }
+  if(query&&!shown)root.innerHTML=`<p class="site-list-empty">No sites match “${escapeHtml(siteFilter.trim())}”.</p>`;
+  $("#site-filter-count").textContent=query?`${shown} of ${state.sites.length} sites match`:"";
   const issues=reviewDesign();
   const guidance=issues.find(i=>i.severity==="error")||issues.find(i=>i.severity==="warning")||issues[0];
   $("#guidance-summary").textContent=guidance?guidance.message:"The address hierarchy is valid and has healthy capacity.";
 }
+const TREE_EXPAND_LIMIT=40;
+let expandedSites=new Set();
+let siteFilter="";
+function siteMatchesFilter(site,query){
+  if(!query)return true;
+  return site.name.toLowerCase().includes(query)||site.cidr.toLowerCase().includes(query)
+    ||site.vlans.some(v=>v.name.toLowerCase().includes(query)||String(v.vid)===query||v.cidr.toLowerCase().includes(query));
+}
+$("#site-filter").addEventListener("input",e=>{siteFilter=e.target.value;renderSiteList()});
+$("#site-filter").addEventListener("keydown",e=>{
+  if(e.key!=="Escape"||!e.target.value)return;
+  e.stopPropagation();e.target.value="";siteFilter="";renderSiteList();
+});
 
 function canvasGeometry(){
   const canvas=$("#canvas"),w=canvas.clientWidth||800,h=canvas.clientHeight||600;
@@ -289,9 +313,11 @@ function siteHealth(site){const issues=reviewDesign().filter(i=>i.siteId===site.
 function select(entity){
   stopTrace();
   selected=entity;
+  const sid=entity?.type==="site"?entity.id:entity?.type==="vlan"?findVlan(entity.id)?.site.id:null;
+  // A chosen site must reveal its networks even in a collapsed tree.
+  if(sid&&state.sites.length>TREE_EXPAND_LIMIT)expandedSites.add(sid);
   const keeper=focusKeeper();
   renderSiteList();
-  const sid=entity?.type==="site"?entity.id:null;
   for(const node of $$(".topology-node"))node.classList.toggle("selected",node.dataset.site===sid);
   renderInspector();
   restoreFocus(keeper);
@@ -388,9 +414,9 @@ function renderProjectLibrary(){
 }
 function openProjects(){saveState();renderProjectLibrary();$("#projects-dialog").showModal()}
 function duplicateProject(){
-  saveState();state=reviveDesign(JSON.parse(JSON.stringify(state)));state.projectId=uid();state.name=`${state.name} copy`;state.mode=state.mode||"existing";undoStack=[];redoStack=[];nudgeBurst={siteId:null,at:0};saveState();renderProjectLibrary();render();showToast("Design duplicated");
+  saveState();state=reviveDesign(JSON.parse(JSON.stringify(state)));state.projectId=uid();state.name=`${state.name} copy`;state.mode=state.mode||"existing";undoStack=[];redoStack=[];nudgeBurst={siteId:null,at:0};expandedSites.clear();saveState();renderProjectLibrary();render();showToast("Design duplicated");
 }
-function newProject(){state=blankState();state.mode="new";selected=null;undoStack=[];redoStack=[];nudgeBurst={siteId:null,at:0};saveState();$("#projects-dialog").close();enterWorkspace();render();openSiteDialog()}
+function newProject(){state=blankState();state.mode="new";selected=null;undoStack=[];redoStack=[];nudgeBurst={siteId:null,at:0};expandedSites.clear();saveState();$("#projects-dialog").close();enterWorkspace();render();openSiteDialog()}
 
 function openSiteDialog(siteId=null){
   editingSiteId=siteId;const form=$("#site-form");form.reset();form.elements.devices.value=50;
@@ -606,7 +632,7 @@ document.addEventListener("click",e=>{
   if(e.target.closest("#duplicate-project"))return duplicateProject();
   if(e.target.closest("#new-project"))return newProject();
   if(e.target.closest("#print-report")){buildView("report");return window.print()}
-  const openProject=e.target.closest("[data-open-project]");if(openProject){const project=loadLibrary()[openProject.dataset.openProject];if(project){state=reviveDesign(project);selected=null;undoStack=[];redoStack=[];nudgeBurst={siteId:null,at:0};saveState();$("#projects-dialog").close();enterWorkspace();render();showToast(`${state.name} opened`)}return}
+  const openProject=e.target.closest("[data-open-project]");if(openProject){const project=loadLibrary()[openProject.dataset.openProject];if(project){state=reviveDesign(project);selected=null;undoStack=[];redoStack=[];nudgeBurst={siteId:null,at:0};expandedSites.clear();saveState();$("#projects-dialog").close();enterWorkspace();render();showToast(`${state.name} opened`)}return}
   const deleteProject=e.target.closest("[data-delete-project]");if(deleteProject&&confirm("Delete this locally saved design?")){const library=loadLibrary();delete library[deleteProject.dataset.deleteProject];storageSet(LIBRARY_KEY,JSON.stringify(library));renderProjectLibrary();showToast("Design deleted");return}
   const recommendVlan=e.target.closest("[data-recommend-vlan]");if(recommendVlan)return openRecommendDialog("vlan",recommendVlan.dataset.recommendVlan);
   const recommendKind=e.target.closest("[data-recommend-kind]");if(recommendKind)return setRecommendationKind(recommendKind.dataset.recommendKind);
@@ -686,7 +712,7 @@ $("#recommend-form").addEventListener("change",()=>buildRecommendation());
 $("#file-input").addEventListener("change",async e=>{
   const file=e.target.files[0];if(!file)return;
   if(file.size>IMPORT_MAX_BYTES){showToast(`Import failed: ${file.name} is larger than 10 MB`);e.target.value="";return}
-  try{const text=await file.text(),isCsv=file.name.toLowerCase().endsWith(".csv"),raw=isCsv?designFromCsv(text):JSON.parse(text.replace(/^\uFEFF/,"")),imported=isCsv?raw:migrateDesign(raw,{strict:true});pushHistory();state=imported;state.mode="imported";selected=null;saveState();enterWorkspace();render();showToast(`${isCsv?"CSV":"Design"} imported and validated`)}
+  try{const text=await file.text(),isCsv=file.name.toLowerCase().endsWith(".csv"),raw=isCsv?designFromCsv(text):JSON.parse(text.replace(/^\uFEFF/,"")),imported=isCsv?raw:migrateDesign(raw,{strict:true});pushHistory();state=imported;state.mode="imported";selected=null;expandedSites.clear();saveState();enterWorkspace();render();showToast(`${isCsv?"CSV":"Design"} imported and validated`)}
   catch(err){
     // A rejected import reports its first issue, but a large rejected design
     // must not silently hide how much else was wrong with it.
@@ -786,7 +812,7 @@ function releasePointer(e,commit){
     // A cancelled gesture never happened: put the node back where the drag
     // found it before dropping the history snapshot.
     if(!commit){drag.site.x=drag.x;drag.site.y=drag.y;if(drag.moved)moveNode(drag.site)}
-    undoStack.pop();updateHistoryButtons();if(commit){selected={type:"site",id:drag.site.id};render()}
+    undoStack.pop();updateHistoryButtons();if(commit)select({type:"site",id:drag.site.id})
   }
   drag=null;
 }

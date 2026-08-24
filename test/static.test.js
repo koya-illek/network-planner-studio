@@ -256,3 +256,15 @@ test("round-3 workspace loop: findings locate sites, imports count issues, zero-
   assert.match(css, /\.review-locate\{min-height:32px/);
   assert.match(css, /\.review-locate\{min-height:44px\}/, "coarse pointers need a full-size locate target");
 });
+
+test("large designs get a searchable, collapsed site tree", async () => {
+  const app = await readFile(new URL("public/app.js", root), "utf8");
+  const html = await readFile(new URL("public/index.html", root), "utf8");
+  assert.match(html, /id="site-filter" type="search"[^>]*aria-label="Filter sites by name, address or VLAN"/, "the filter must be labelled");
+  assert.match(html, /id="site-filter-count"[^>]*role="status"/, "match counts must be announced politely");
+  assert.match(app, /const TREE_EXPAND_LIMIT=40;/, "the expansion threshold must be explicit");
+  assert.match(app, /function siteMatchesFilter\(site,query\)/, "filtering must search name, range and VLANs");
+  assert.match(app, /const openVlans=!collapse\|\|expandedSites\.has\(site\.id\)\|\|Boolean\(query\);/, "collapsed trees open on selection or match");
+  assert.ok((app.match(/expandedSites\.clear\(\)/g) ?? []).length >= 5, "design replacement points must reset expansions (but not pushHistory)");
+  assert.ok(!/function pushHistory\(\)\{[^}]*expandedSites\.clear\(\)/.test(app), "ordinary edits must not collapse the tree");
+});
