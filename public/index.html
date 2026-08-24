@@ -96,7 +96,7 @@
             <div><h2>Sites and networks</h2></div>
             <button class="icon-button" id="add-site-side" type="button" aria-label="Add site" title="Add site">+</button>
           </div>
-          <div class="site-filter-row"><input id="site-filter" type="search" placeholder="Filter sites…" aria-label="Filter sites by name, address or VLAN" autocomplete="off"></div>
+          <div class="site-filter-row"><input id="site-filter" type="search" placeholder="Filter sites…" aria-label="Filter sites by name, address, type, role or VLAN" autocomplete="off"></div>
           <p id="site-filter-count" class="site-filter-count" role="status"></p>
           <div id="site-list" class="site-list"></div>
           <div class="panel-help">
@@ -150,7 +150,7 @@
             <div><button class="button ghost" id="csv-export" type="button">Export CSV</button> <button class="button primary" id="add-vlan-address" type="button">+ Add VLAN</button></div>
           </div>
           <div id="address-summary" class="summary-grid"></div>
-          <div class="address-filter-row"><input id="address-filter" type="search" placeholder="Filter rows…" aria-label="Filter address plan rows by site, VLAN name, ID or subnet" autocomplete="off"><p id="address-filter-count" role="status"></p></div>
+          <div class="address-filter-row"><input id="address-filter" type="search" placeholder="Filter rows…" aria-label="Filter address plan rows by site, VLAN name, ID, subnet or role" autocomplete="off"><p id="address-filter-count" role="status"></p></div>
           <div class="table-card">
             <table>
               <thead><tr><th scope="col">Site / network</th><th scope="col">VLAN</th><th scope="col">IPv4 prefix</th><th scope="col">Gateway</th><th scope="col">Needed</th><th scope="col">Usable</th><th scope="col">Headroom</th><th scope="col">Status</th></tr></thead>

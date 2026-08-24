@@ -703,6 +703,11 @@ test("a large imported design collapses the site tree and answers filtering", as
   await expect(page.locator(".site-tree")).toHaveCount(1);
   await expect(page.locator(".site-tree").locator(".vlan-row")).toHaveCount(2);
   await expect(page.locator(".topology-node")).toHaveCount(45);
+  // Types and roles are first-class search terms.
+  await page.locator("#site-filter").fill("warehouse");
+  await expect(page.locator("#site-filter-count")).toHaveText("45 of 45 sites match");
+  await page.locator("#site-filter").fill("hub");
+  await expect(page.locator("#site-filter-count")).toHaveText("1 of 45 sites match");
   // Clearing restores the collapsed overview.
   await page.locator("#site-filter").fill("");
   await expect(page.locator(".site-row-select")).toHaveCount(45);
@@ -747,6 +752,9 @@ test("the address plan filter narrows rows and Escape resets it", async ({ page 
   await page.locator("#address-filter").press("Escape");
   await expect(page.locator("#address-filter")).toHaveValue("");
   await expect(page.locator("#address-table tr")).toHaveCount(total);
+  // VLAN roles are searchable even when no visible column contains them.
+  await page.locator("#address-filter").fill("servers");
+  expect(await page.locator("#address-table tr")).toHaveCount(2);
   // A nonsense query shows the honest empty state, not stale rows.
   await page.locator("#address-filter").fill("zzzz");
   await expect(page.locator("#address-table")).toContainText("No rows match");

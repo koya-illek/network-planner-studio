@@ -263,7 +263,7 @@ test("round-3 workspace loop: findings locate sites, imports count issues, zero-
 test("large designs get a searchable, collapsed site tree", async () => {
   const app = await readFile(new URL("public/app.js", root), "utf8");
   const html = await readFile(new URL("public/index.html", root), "utf8");
-  assert.match(html, /id="site-filter" type="search"[^>]*aria-label="Filter sites by name, address or VLAN"/, "the filter must be labelled");
+  assert.match(html, /id="site-filter" type="search"[^>]*aria-label="Filter sites by name, address, type, role or VLAN"/, "the filter must be labelled");
   assert.match(html, /id="site-filter-count"[^>]*role="status"/, "match counts must be announced politely");
   assert.match(app, /const TREE_EXPAND_LIMIT=40;/, "the expansion threshold must be explicit");
   assert.match(app, /function siteMatchesFilter\(site,query\)/, "filtering must search name, range and VLANs");

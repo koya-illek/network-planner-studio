@@ -242,10 +242,13 @@ function renderSiteList(){
 const TREE_EXPAND_LIMIT=40;
 let expandedSites=new Set();
 let siteFilter="";
+// Filters read the design's mental buckets too: "datacentre", "hub" or
+// "guest" are how people look for sites and networks at imported scale.
 function siteMatchesFilter(site,query){
   if(!query)return true;
   return site.name.toLowerCase().includes(query)||site.cidr.toLowerCase().includes(query)
-    ||site.vlans.some(v=>v.name.toLowerCase().includes(query)||String(v.vid)===query||v.cidr.toLowerCase().includes(query));
+    ||site.type.toLowerCase().includes(query)||site.topologyRole.toLowerCase().includes(query)
+    ||site.vlans.some(v=>v.name.toLowerCase().includes(query)||String(v.vid)===query||v.cidr.toLowerCase().includes(query)||v.role.toLowerCase().includes(query));
 }
 $("#site-filter").addEventListener("input",e=>{siteFilter=e.target.value;renderSiteList()});
 $("#site-filter").addEventListener("keydown",e=>{
@@ -377,7 +380,8 @@ function roleAdvice(role){return{users:"Keep user endpoints separate from infras
 let addressFilter="";
 function addressRowMatches(site,v,query){
   return site.name.toLowerCase().includes(query)||site.cidr.toLowerCase().includes(query)
-    ||v.name.toLowerCase().includes(query)||String(v.vid)===query||v.cidr.toLowerCase().includes(query);
+    ||site.type.toLowerCase().includes(query)||site.topologyRole.toLowerCase().includes(query)
+    ||v.name.toLowerCase().includes(query)||String(v.vid)===query||v.cidr.toLowerCase().includes(query)||v.role.toLowerCase().includes(query);
 }
 function renderAddressPlan(){
   const all=state.sites.flatMap(s=>s.vlans.map(v=>({site:s,vlan:v,p:safeParse(v.cidr)})));
