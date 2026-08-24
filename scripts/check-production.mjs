@@ -41,9 +41,13 @@ expect("unknown route uses the branded page", missingBody.includes("That page is
 
 const exampleResponse = await fetch(`${canonicalOrigin}/api/v1/example-design`, { cache: "no-store" });
 expectEqual("example design status", exampleResponse.status, 200);
-const example = await exampleResponse.json();
-expectEqual("example design name", example.name, "Illek example network");
-expectEqual("example design sites", Array.isArray(example.sites) && example.sites.length >= 2, true);
+const example = await exampleResponse.json().catch(() => null);
+if (example) {
+  expectEqual("example design name", example.name, "Illek example network");
+  expectEqual("example design sites", Array.isArray(example.sites) && example.sites.length >= 2, true);
+} else {
+  failures.push("example design: response body was not JSON");
+}
 
 if (failures.length) throw new Error(`Production smoke check failed:\n- ${failures.join("\n- ")}`);
 process.stdout.write(`Production serves ${packageMetadata.name} ${packageMetadata.version}, schema ${SCHEMA_VERSION}, on canonical and legacy routes.\n`);
