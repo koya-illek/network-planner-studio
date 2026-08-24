@@ -23,7 +23,7 @@ test("the planning API validates and traces designs over HTTP", async ({ request
   const health = await request.get("/api/v1");
   expect(health.ok()).toBeTruthy();
   const directory = await health.json();
-  expect(directory.endpoints).toHaveLength(7);
+  expect(directory.endpoints).toHaveLength(9);
   expect(directory.mcp).toBe("/mcp");
   expect(directory.designSchema).toBe("/api/v1/design-schema.json");
 
@@ -69,4 +69,25 @@ test("the MCP handshake works against the dev worker", async ({ request }) => {
     data: { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "review_design", arguments: { design } } }
   })).json();
   expect(reviewed.result.structuredContent.summary.errors).toBe(0);
+});
+
+test("the planning engine answers site plans over HTTP and MCP", async ({ request }) => {
+  const planned = await request.post("/api/v1/sites/plan", {
+    data: { type: "branch", devices: 60, growth: 30, name: "Galway office", sites: design.sites }
+  });
+  expect(planned.ok()).toBeTruthy();
+  const { result } = await planned.json();
+  expect(result.plan.vlans.map(v => v.role)).toEqual(["users", "voice", "guest", "management"]);
+  for (const vlan of result.plan.vlans) expect(vlan.id).toBeUndefined();
+
+  const merged = await request.post("/api/v1/validate", {
+    data: { design: { ...design, sites: [...design.sites, { id: "galway", name: result.plan.name, type: result.plan.type, cidr: result.plan.cidr, devices: result.plan.devices, wan: "single", growth: result.plan.growth, x: 60, y: 60, topologyRole: "spoke", hubId: "hq", internetBreakout: "hub", vlans: result.plan.vlans.map((v, i) => ({ ...v, id: `g-${i}` })) }] } }
+  });
+  expect((await merged.json()).result.valid).toBe(true);
+
+  const viaMcp = await (await request.post("/mcp", {
+    headers: { "Content-Type": "application/json" },
+    data: { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "plan_vlan", arguments: { sites: design.sites, siteId: "hq", role: "guest", devices: 25 } } }
+  })).json();
+  expect(viaMcp.result.structuredContent.plan.vid).toBe(30);
 });

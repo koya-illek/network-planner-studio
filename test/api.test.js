@@ -56,7 +56,7 @@ test("the service directory describes every endpoint with release provenance", a
   assert.equal(body.version, packageMetadata.version);
   assert.equal(body.schema, SCHEMA_ID);
   assert.equal(body.schemaVersion, SCHEMA_VERSION);
-  assert.equal(body.endpoints.length, 7);
+  assert.equal(body.endpoints.length, 9);
 });
 
 test("machine responses carry the hardening set, no-store caching and noindex", async () => {
@@ -256,4 +256,64 @@ test("the directory points at the MCP surface and the schema artifact", async ()
   assert.equal(directory.mcp, "/mcp");
   assert.equal(directory.designSchema, "/api/v1/design-schema.json");
   assert.ok(directory.endpoints.some(entry => entry.path === "/api/v1/design-schema.json"));
+});
+
+/* Site and VLAN planning over HTTP. */
+
+test("planning a site returns a complete identity-free plan", async () => {
+  const response = await postJson("/api/v1/sites/plan", { type: "office", devices: 50, growth: 30, name: "Limerick office" });
+  assert.equal(response.status, 200);
+  const { ok, result } = await response.json();
+  assert.equal(ok, true);
+  const { plan } = result;
+  assert.equal(plan.name, "Limerick office");
+  assert.deepEqual(plan.vlans.map(v => v.role), ["users", "voice", "guest", "management"]);
+  for (const vlan of plan.vlans) {
+    assert.ok(vlan.vid >= 1 && vlan.vid <= 4094);
+    assert.ok(vlan.cidr && vlan.gateway, "each planned VLAN needs addressing");
+    assert.equal(vlan.id, undefined, "plans are identity-free");
+  }
+  // The plan must survive canonical validation when merged into a design.
+  const merged = await postJson("/api/v1/validate", { design: { schema: SCHEMA_ID, version: SCHEMA_VERSION, topologyMode: "custom", policies: { spokeToSpoke: "via-hub" }, flowPolicies: {}, links: [], sites: [{ id: "s1", name: plan.name, type: plan.type, cidr: plan.cidr, devices: plan.devices, wan: "single", growth: plan.growth, x: 20, y: 20, topologyRole: "standalone", hubId: null, internetBreakout: "local", vlans: plan.vlans.map((v, i) => ({ ...v, id: `m-${i}` })) }] } });
+  assert.equal((await merged.json()).result.valid, true);
+});
+
+test("site planning follows the conventions of the supplied sites", async () => {
+  const sites = [{ id: "hq", cidr: "10.20.0.0/16", vlans: [{ vid: 10, role: "users" }, { vid: 97, role: "management" }, { vid: 10, role: "users" }] }];
+  const response = await postJson("/api/v1/sites/plan", { type: "office", devices: 40, sites });
+  const { result } = await response.json();
+  assert.deepEqual(result.plan.vlans.map(v => v.vid), [10, 20, 30, 97]);
+});
+
+test("site planning rejects bad input with honest problem codes", async () => {
+  const badType = await postJson("/api/v1/sites/plan", { type: "spaceship" });
+  assert.equal(badType.status, 400);
+  assert.equal((await badType.json()).error.code, "invalid_input");
+  const noRoom = await postJson("/api/v1/sites/plan", { sites: [{ id: "x", cidr: "10.0.0.0/8" }, { id: "y", cidr: "172.16.0.0/12" }, { id: "z", cidr: "192.168.0.0/16" }] });
+  assert.equal(noRoom.status, 400);
+  assert.equal((await noRoom.json()).error.code, "unallocatable");
+  const wrongSites = await postJson("/api/v1/sites/plan", { sites: "hq" });
+  assert.equal(wrongSites.status, 400);
+  assert.equal((await wrongSites.json()).error.code, "invalid_input");
+  const get = await fetchApi("/api/v1/sites/plan");
+  assert.equal(get.status, 405);
+  assert.equal(get.headers.get("Allow"), "POST, OPTIONS");
+});
+
+test("planning a VLAN reuses the environment convention inside the chosen site", async () => {
+  const sites = [
+    { id: "hq", name: "HQ", cidr: "10.20.0.0/16", growth: 30, vlans: [{ id: "v1", vid: 10, role: "users", devices: 40, cidr: "10.20.10.0/24", gateway: "10.20.10.1", dhcpEnabled: true, reserved: 1, dhcpStart: "10.20.10.2", dhcpEnd: "10.20.10.254" }] },
+    { id: "b1", name: "Dublin", cidr: "10.30.0.0/16", growth: 30, vlans: [] }
+  ];
+  const response = await postJson("/api/v1/vlans/plan", { sites, siteId: "hq", role: "guest", devices: 30 });
+  assert.equal(response.status, 200);
+  const { result } = await response.json();
+  assert.equal(result.plan.vid, 30);
+  assert.match(result.plan.cidr, /^10\.20\./);
+  const unknown = await postJson("/api/v1/vlans/plan", { sites, siteId: "nope" });
+  assert.equal(unknown.status, 400);
+  assert.equal((await unknown.json()).error.code, "unknown_site");
+  const missing = await postJson("/api/v1/vlans/plan", { sites });
+  assert.equal(missing.status, 400);
+  assert.equal((await missing.json()).error.code, "missing_field");
 });

@@ -6,7 +6,7 @@
  */
 import packageMetadata from "./package.json" with { type: "json" };
 import { machineResponseHeaders, machinePreflightHeaders } from "./headers.js";
-import { HttpProblem, readJsonBody, opValidate, opReview, opRoute, opNextSubnet, opSuggestRange } from "./api.js";
+import { HttpProblem, readJsonBody, opValidate, opReview, opRoute, opNextSubnet, opSuggestRange, opPlanSite, opPlanVlan } from "./api.js";
 
 const PROTOCOL_VERSION = "2025-06-18";
 const SUPPORTED_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26"];
@@ -55,6 +55,49 @@ const findingSchema = {
 const cidrResultSchema = {
   type: "object", required: ["cidr"], additionalProperties: false,
   properties: { cidr: { type: "string", description: "Allocated IPv4 CIDR block." } }
+};
+
+// Planned VLANs are identity-free: agents assign ids when merging a plan
+// into a design document.
+const plannedVlanSchema = {
+  type: "object", required: ["name", "vid", "role", "devices", "cidr", "gateway"],
+  properties: {
+    name: { type: "string" },
+    vid: { type: "integer", minimum: 1, maximum: 4094 },
+    role: { type: "string", enum: ["users", "voice", "guest", "iot", "servers", "management", "transit", "other"] },
+    devices: { type: "integer" },
+    cidr: { type: "string" },
+    gateway: { type: "string" },
+    dhcpEnabled: { type: "boolean" },
+    reserved: { type: "integer" },
+    dhcpStart: { type: "string" },
+    dhcpEnd: { type: "string" },
+    notes: { type: "string" }
+  }
+};
+const sitePlanResultSchema = {
+  type: "object", required: ["plan"],
+  properties: {
+    plan: {
+      type: "object", required: ["name", "type", "devices", "growth", "cidr", "vlans"],
+      properties: {
+        name: { type: "string" },
+        type: { type: "string", enum: ["office", "branch", "datacentre", "cloud", "warehouse"] },
+        devices: { type: "integer" },
+        growth: { type: "number" },
+        cidr: { type: "string", description: "Suggested free RFC1918 parent block for the site." },
+        vlans: { type: "array", items: plannedVlanSchema }
+      }
+    }
+  }
+};
+const vlanPlanResultSchema = {
+  type: "object", required: ["plan"],
+  properties: { plan: plannedVlanSchema }
+};
+const sitesInput = {
+  type: "array", items: { type: "object", description: "A design site (id, cidr, vlans)." },
+  description: "Existing sites, used for range avoidance and VLAN ID conventions."
 };
 
 const TOOLS = [
@@ -130,6 +173,39 @@ const TOOLS = [
     }
   ),
   tool(
+    "plan_site",
+    "Plan a complete compatible site",
+    "Run the workspace recommendation engine: pick a free RFC1918 parent block, then one growth-sized subnet per role, following the VLAN ID conventions of the sites you pass in. Returns an identity-free plan ready to merge into a design.",
+    {
+      type: "object",
+      properties: {
+        type: { type: "string", enum: ["office", "branch", "datacentre", "cloud", "warehouse"], default: "office" },
+        devices: { type: "integer", minimum: 1, maximum: 50000, default: 50, description: "Planned primary devices; role shares derive from it." },
+        growth: { type: "number", minimum: 0, maximum: 1000, default: 30 },
+        name: { type: "string", default: "New site" },
+        sites: { ...sitesInput }
+      }
+    },
+    sitePlanResultSchema
+  ),
+  tool(
+    "plan_vlan",
+    "Plan one compatible VLAN",
+    "Allocate the smallest recommended subnet inside an existing site using the site's growth allowance and the environment's most-used VLAN ID for the role.",
+    {
+      type: "object",
+      required: ["sites", "siteId"],
+      properties: {
+        sites: { ...sitesInput },
+        siteId: { type: "string", description: "Id of the site that will own the new VLAN." },
+        role: { type: "string", enum: ["users", "voice", "guest", "iot", "servers", "management", "transit", "other"], default: "other" },
+        devices: { type: "integer", minimum: 1, maximum: 65534, default: 30 },
+        name: { type: "string" }
+      }
+    },
+    vlanPlanResultSchema
+  ),
+  tool(
     "next_subnet",
     "Allocate the next free aligned IPv4 subnet",
     "Given a parent CIDR and a required prefix, return the first aligned subnet that does not overlap any occupied CIDR.",
@@ -174,6 +250,8 @@ function callTool(name, args = {}) {
       occupied: args.occupied
     });
     case "suggest_site_range": return opSuggestRange(args);
+    case "plan_site": return opPlanSite(args);
+    case "plan_vlan": return opPlanVlan(args);
     default: return undefined;
   }
 }
@@ -241,7 +319,7 @@ export async function handleMcpRequest(request) {
           protocolVersion: negotiated,
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: packageMetadata.name, title: "Network Planner Studio", version: packageMetadata.version },
-          instructions: "Stateless IPv4 planning tools over the network-planner-studio/design v3 model. Use validate_design after building a design and review_design for heuristic findings; next_subnet and suggest_site_range allocate addresses; find_route traces inter-site paths under topology policy."
+          instructions: "Stateless IPv4 planning tools over the network-planner-studio/design v3 model. Use validate_design after building a design and review_design for heuristic findings; plan_site and plan_vlan produce compatible identity-free plans you can merge into a design (assign ids first); next_subnet and suggest_site_range allocate addresses; find_route traces inter-site paths under topology policy."
         }, negotiated);
       case "ping":
         return rpcResult(id, {}, negotiated);

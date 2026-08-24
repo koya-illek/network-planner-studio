@@ -7,7 +7,8 @@ import packageMetadata from "./package.json" with { type: "json" };
 import { machineResponseHeaders, machinePreflightHeaders } from "./headers.js";
 import {
   SCHEMA_ID, SCHEMA_VERSION, DesignValidationError, migrateDesign, validateDesign,
-  reviewDesignIssues, designScore, shortestPath, nextSubnet, suggestSiteRange
+  reviewDesignIssues, designScore, shortestPath, nextSubnet, suggestSiteRange,
+  recommendSitePlan, recommendVlanPlan
 } from "./public/network-core.js";
 
 export const API_BODY_LIMIT_BYTES = 1024 * 1024;
@@ -163,6 +164,66 @@ export function opSuggestRange({ occupied, devices } = {}) {
   }
 }
 
+/** Map the planner's structured rejection onto an honest HTTP problem. */
+function planProblem(error) {
+  const code = error.errors?.[0]?.code;
+  if (code === "unknown-site") return new HttpProblem(400, "unknown_site", error.message);
+  if (code === "unallocatable" || code === "exhausted") return new HttpProblem(400, "unallocatable", error.message);
+  return new HttpProblem(400, "invalid_input", error.message);
+}
+
+function optionalSites(value) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.some(entry => !entry || typeof entry !== "object" || Array.isArray(entry))) {
+    throw new HttpProblem(400, "invalid_input", "sites must be an array of site objects with cidr and vlans.");
+  }
+  return value;
+}
+
+function optionalText(value, label, max = 100) {
+  if (value === undefined || value === null) return "";
+  if (typeof value !== "string") throw new HttpProblem(400, "invalid_input", `${label} must be a string.`);
+  if (value.length > max) throw new HttpProblem(400, "invalid_input", `${label} must be at most ${max} characters.`);
+  return value;
+}
+
+export function opPlanSite({ type, devices, growth, name, sites } = {}) {
+  try {
+    return { plan: recommendSitePlan({
+      sites: optionalSites(sites),
+      type: type === undefined ? "office" : type,
+      devices: devices === undefined ? 50 : devices,
+      growth: growth === undefined ? 30 : growth,
+      name: optionalText(name, "name")
+    }) };
+  } catch (error) {
+    if (error instanceof DesignValidationError) throw planProblem(error);
+    throw error;
+  }
+}
+
+export function opPlanVlan({ sites, siteId, role, devices, name } = {}) {
+  if (!Array.isArray(sites)) throw new HttpProblem(400, "invalid_input", "sites must be an array of site objects; include the site that will own the VLAN.");
+  if (siteId === undefined || siteId === null || siteId === "") throw new HttpProblem(400, "missing_field", 'The request body must include "siteId".');
+  for (const entry of sites) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new HttpProblem(400, "invalid_input", "sites must be an array of site objects with cidr and vlans.");
+    }
+  }
+  try {
+    return { plan: recommendVlanPlan({
+      sites,
+      siteId,
+      role: role === undefined ? "other" : role,
+      devices: devices === undefined ? 30 : devices,
+      name: optionalText(name, "name")
+    }) };
+  } catch (error) {
+    if (error instanceof DesignValidationError) throw planProblem(error);
+    throw error;
+  }
+}
+
 function directory() {
   return {
     ok: true,
@@ -179,6 +240,8 @@ function directory() {
       { method: "POST", path: "/api/v1/validate", description: "Canonicalize a design against schema v3 and report hard validation errors, warnings and normalization corrections." },
       { method: "POST", path: "/api/v1/review", description: "Run the workspace design review: weighted score plus heuristic findings (overlaps, capacity, hub-and-spoke consistency)." },
       { method: "POST", path: "/api/v1/route", description: "Trace the shortest permitted inter-site path under a design's topology policy." },
+      { method: "POST", path: "/api/v1/sites/plan", description: "Plan a complete compatible site: a free RFC1918 block plus role-sized VLANs following the environment's ID conventions." },
+      { method: "POST", path: "/api/v1/vlans/plan", description: "Plan one compatible VLAN inside an existing site, using the environment's VLAN ID convention." },
       { method: "POST", path: "/api/v1/subnets/next", description: "Allocate the next aligned free subnet inside a parent range." },
       { method: "POST", path: "/api/v1/site-range/suggest", description: "Suggest a non-overlapping RFC1918 site block for a planned device count." }
     ]
@@ -342,6 +405,41 @@ function openapi() {
           responses: { ...jsonResponseFor({ type: "object", properties: { cidr: { type: "string" } }, required: ["cidr"] }), ...errors }
         }
       },
+      "/api/v1/sites/plan": {
+        post: {
+          summary: "Plan a complete compatible site",
+          description: "Runs the workspace recommendation engine: picks a free RFC1918 parent block, then one growth-sized subnet per role (office/branch: users, voice, guest, management; warehouse adds IoT; cloud and datacentre get servers plus management), following the VLAN ID conventions of the sites you pass in. Plans carry no object ids; assign them when merging into a design.",
+          requestBody: jsonBody({
+            type: "object",
+            properties: {
+              type: { type: "string", enum: ["office", "branch", "datacentre", "cloud", "warehouse"], default: "office" },
+              devices: { type: "integer", minimum: 1, maximum: 50000, default: 50, description: "Planned primary devices; role shares derive from it." },
+              growth: { type: "number", minimum: 0, maximum: 1000, default: 30 },
+              name: { type: "string", default: "New site" },
+              sites: { type: "array", items: designRef, description: "Existing sites, used for range avoidance and VLAN ID conventions." }
+            }
+          }),
+          responses: { ...jsonResponseFor({ $ref: "#/components/schemas/SitePlan" }), ...errors }
+        }
+      },
+      "/api/v1/vlans/plan": {
+        post: {
+          summary: "Plan one compatible VLAN",
+          description: "Allocates the smallest recommended subnet inside an existing site using the site's growth allowance, and the environment's most-used VLAN ID for the role.",
+          requestBody: jsonBody({
+            type: "object",
+            required: ["sites", "siteId"],
+            properties: {
+              sites: { type: "array", items: designRef, description: "The design's sites; one must match siteId." },
+              siteId: { type: "string", description: "Id of the site that will own the new VLAN." },
+              role: { type: "string", enum: ["users", "voice", "guest", "iot", "servers", "management", "transit", "other"], default: "other" },
+              devices: { type: "integer", minimum: 1, maximum: 65534, default: 30 },
+              name: { type: "string", description: "Defaults to the role's conventional name." }
+            }
+          }),
+          responses: { ...jsonResponseFor({ $ref: "#/components/schemas/VlanPlan" }), ...errors }
+        }
+      },
       "/api/v1/site-range/suggest": {
         post: {
           summary: "Suggest a private site block",
@@ -414,6 +512,53 @@ function openapi() {
             hopIds: { type: "array", items: { type: "string" } },
             links: { type: "array", items: { type: "string" }, description: "Link ids traversed." }
           }
+        },
+        PlannedVlan: {
+          type: "object",
+          description: "One planned VLAN. Identity-free: assign an id when merging into a design.",
+          required: ["name", "vid", "role", "devices", "cidr", "gateway"],
+          properties: {
+            name: { type: "string" },
+            vid: { type: "integer", minimum: 1, maximum: 4094 },
+            role: { type: "string", enum: ["users", "voice", "guest", "iot", "servers", "management", "transit", "other"] },
+            devices: { type: "integer" },
+            cidr: { type: "string" },
+            gateway: { type: "string" },
+            dhcpEnabled: { type: "boolean" },
+            reserved: { type: "integer" },
+            dhcpStart: { type: "string" },
+            dhcpEnd: { type: "string" },
+            notes: { type: "string" }
+          }
+        },
+        SitePlan: {
+          type: "object",
+          required: ["name", "type", "devices", "growth", "cidr", "vlans"],
+          properties: {
+            name: { type: "string" },
+            type: { type: "string", enum: ["office", "branch", "datacentre", "cloud", "warehouse"] },
+            devices: { type: "integer" },
+            growth: { type: "number" },
+            cidr: { type: "string", description: "Suggested free RFC1918 parent block for the site." },
+            vlans: { type: "array", items: { $ref: "#/components/schemas/PlannedVlan" } }
+          }
+        },
+        VlanPlan: {
+          type: "object",
+          required: ["name", "vid", "role", "devices", "cidr", "gateway"],
+          properties: {
+            name: { type: "string" },
+            vid: { type: "integer", minimum: 1, maximum: 4094 },
+            role: { type: "string", enum: ["users", "voice", "guest", "iot", "servers", "management", "transit", "other"] },
+            devices: { type: "integer" },
+            cidr: { type: "string" },
+            gateway: { type: "string" },
+            dhcpEnabled: { type: "boolean" },
+            reserved: { type: "integer" },
+            dhcpStart: { type: "string" },
+            dhcpEnd: { type: "string" },
+            notes: { type: "string" }
+          }
         }
       }
     }
@@ -467,7 +612,9 @@ export async function handleApiRequest(request) {
         prefix: requireField(body, "prefix"),
         occupied: body.occupied
       }),
-      "/api/v1/site-range/suggest": body => opSuggestRange(body)
+      "/api/v1/site-range/suggest": body => opSuggestRange(body),
+      "/api/v1/sites/plan": body => opPlanSite(body),
+      "/api/v1/vlans/plan": body => opPlanVlan(body)
     };
     const handler = postedRoutes[url.pathname];
     if (handler) {

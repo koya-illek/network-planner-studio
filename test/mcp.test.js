@@ -72,10 +72,10 @@ test("notifications are acknowledged with an empty 202", async () => {
   assert.equal(await response.text(), "");
 });
 
-test("tools/list describes five planning tools with input and output schemas", async () => {
+test("tools/list describes the planning tools with input and output schemas", async () => {
   const { body } = await rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" });
   const names = body.result.tools.map(entry => entry.name);
-  assert.deepEqual(names, ["validate_design", "review_design", "find_route", "next_subnet", "suggest_site_range"]);
+  assert.deepEqual(names, ["validate_design", "review_design", "find_route", "plan_site", "plan_vlan", "next_subnet", "suggest_site_range"]);
   for (const entry of body.result.tools) {
     assert.equal(entry.inputSchema.type, "object");
     assert.equal(entry.outputSchema?.type, "object", `${entry.name} must declare its structured result shape`);
@@ -222,4 +222,37 @@ test("a pinned unsupported protocol version is refused with 400", async () => {
 test("a supported pinned protocol version passes through untouched", async () => {
   const { response } = await rpc({ jsonrpc: "2.0", id: 1, method: "tools/list" }, { headers: { "MCP-Protocol-Version": "2025-03-26" } });
   assert.equal(response.status, 200);
+});
+
+/* Planning tools: one call produces a compatible identity-free plan. */
+
+test("tools/list advertises the planning tools with output schemas", async () => {
+  const { body } = await rpc({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+  const names = body.result.tools.map(entry => entry.name);
+  assert.ok(names.includes("plan_site"));
+  assert.ok(names.includes("plan_vlan"));
+  const planSite = body.result.tools.find(entry => entry.name === "plan_site");
+  assert.equal(planSite.outputSchema.required[0], "plan");
+  assert.equal(planSite.inputSchema.properties.type.enum[0], "office");
+});
+
+test("plan_site computes a mergeable plan through tools/call", async () => {
+  const { body } = await rpc({
+    jsonrpc: "2.0", id: 2, method: "tools/call",
+    params: { name: "plan_site", arguments: { type: "office", devices: 50, name: "Limerick office" } }
+  });
+  assert.equal(body.result.isError, undefined);
+  const plan = body.result.structuredContent.plan;
+  assert.deepEqual(plan.vlans.map(v => v.role), ["users", "voice", "guest", "management"]);
+  for (const vlan of plan.vlans) assert.equal(vlan.id, undefined);
+});
+
+test("plan_vlan resolves the owning site and reports failures as tool results", async () => {
+  const design = validDesign();
+  const call = args => rpc({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "plan_vlan", arguments: args } });
+  const good = await call({ sites: design.sites, siteId: "branch", role: "guest", devices: 25 });
+  assert.equal(good.body.result.structuredContent.plan.role, "guest");
+  const bad = await call({ sites: design.sites, siteId: "ghost-town", role: "guest" });
+  assert.equal(bad.body.result.isError, true);
+  assert.match(bad.body.result.content[0].text, /unknown_site/);
 });

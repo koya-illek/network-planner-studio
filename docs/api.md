@@ -134,6 +134,49 @@ Allocates the next aligned free subnet inside a parent range:
 Suggests a non-overlapping RFC1918 block sized for a device count:
 `{"occupied":["10.20.0.0/16"],"devices":50}` → `{"cidr":"10.21.0.0/20"}`.
 
+### `POST /api/v1/sites/plan`
+
+Plans a complete compatible site in one call — the same engine behind the
+workspace's "Recommend" dialog. It picks a free RFC1918 parent block, then one
+growth-sized subnet per role (office/branch: users, voice, guest, management;
+warehouse adds IoT; cloud and datacentre get servers plus management), and
+follows the VLAN ID conventions of the sites you pass in.
+
+```sh
+curl -sS https://network.illek.ie/api/v1/sites/plan \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"branch","devices":60,"growth":30,"name":"Limerick office","sites":[]}'
+```
+
+```json
+{ "ok": true, "result": { "plan": {
+    "name": "Limerick office", "type": "branch", "devices": 60, "growth": 30,
+    "cidr": "10.21.0.0/20",
+    "vlans": [ { "name": "Staff", "vid": 10, "role": "users", "devices": 60,
+                 "cidr": "10.21.0.0/24", "gateway": "10.21.0.1", "…": "…" } ] } } }
+```
+
+Plans are **identity-free**: assign object ids when merging into a design.
+Every returned plan has already passed canonical validation as a composed
+site. Failures map to honest problem codes: `invalid_input`, `unallocatable`.
+
+### `POST /api/v1/vlans/plan`
+
+Plans one compatible VLAN inside an existing site: smallest recommended subnet
+under the site's growth allowance, the environment's most-used VLAN ID for the
+role (falling back down the ranking), DHCP pools excluded from reserved
+addresses and the gateway.
+
+```json
+{ "sites": [ "…design sites; one must match siteId…" ], "siteId": "hq",
+  "role": "guest", "devices": 30 }
+```
+
+Response: `{ "plan": { "name", "vid", "role", "devices", "cidr", "gateway",
+"dhcpEnabled", "reserved", "dhcpStart", "dhcpEnd" } }`. Unknown sites return
+`400 unknown_site`; exhausted or uncontainable ranges return `400
+unallocatable`.
+
 ## MCP server
 
 Connect an MCP client to `https://network.illek.ie/mcp`. The server implements
@@ -142,7 +185,7 @@ the Streamable HTTP transport in stateless JSON mode:
 - `initialize` negotiates protocol `2025-06-18` (also accepts `2025-03-26`);
   requests that pin an unsupported version via the `MCP-Protocol-Version`
   header are refused with `400`
-- `tools/list` returns five tools; every tool declares both an `inputSchema`
+- `tools/list` returns seven tools; every tool declares both an `inputSchema`
   and an `outputSchema`, `structuredContent` conforms to that output shape,
   and each tool carries `readOnlyHint`/`idempotentHint`/`openWorldHint`
   annotations (pure compute: no side effects, deterministic, no external
@@ -157,6 +200,8 @@ the Streamable HTTP transport in stateless JSON mode:
 | `validate_design` | Canonicalize + hard-check a design document |
 | `review_design` | Workspace review score and findings |
 | `find_route` | Permitted inter-site path trace |
+| `plan_site` | Complete compatible site plan (identity-free) |
+| `plan_vlan` | Compatible VLAN plan inside an existing site |
 | `next_subnet` | Next aligned free subnet inside a parent |
 | `suggest_site_range` | Private site block suggestion |
 

@@ -38,7 +38,7 @@ data flow, privacy boundary, deployment topology, and external dependencies.
 - Multiple local projects with duplicate, open and delete workflows
 - Print-ready implementation report for PDF handoff
 - Versioned JSON migration plus RFC 4180 CSV address-plan import/export
-- Versioned REST planning API (`/api/v1`, OpenAPI-described, with a standalone JSON Schema of the design model) and an MCP tool server at `/mcp` for AI agents — see [docs/api.md](docs/api.md)
+- Versioned REST planning API (`/api/v1`, OpenAPI-described, with a standalone JSON Schema of the design model) and an MCP tool server at `/mcp` — both expose the recommendation engine (`sites/plan`, `plan_site`) alongside validation, review, routing and allocation; see [docs/api.md](docs/api.md)
 - Zoom, pan, pinch, fit-to-screen, undoable keyboard nudges, drag-cancel snap-back and a mobile site drawer
 - Responsive desktop and mobile layouts
 

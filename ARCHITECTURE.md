@@ -53,7 +53,7 @@ No project-data arrow returns to Cloudflare from normal browser use because desi
 | --- | --- | --- |
 | Cloudflare Worker | Serves static assets with security and cross-origin isolation headers, canonical-host redirects, a branded 404 page, a small health endpoint, and the machine surfaces | `worker.js` |
 | Shared hardening | Single source of the response security set plus machine-response additions (no-store, noindex, CORS) | `headers.js` |
-| REST planning API | Versioned stateless endpoints: validate, review, route, subnet allocation, OpenAPI description, standalone JSON Schema of the design model | `api.js` |
+| REST planning API | Versioned stateless endpoints: validate, review, route, site/VLAN planning, subnet allocation, OpenAPI description, standalone JSON Schema of the design model | `api.js` |
 | MCP tool server | Streamable-HTTP (stateless JSON mode) tools mirroring the REST operations for AI agents | `mcp.js` |
 | Browser shell | Manages project workflows, forms, topology interaction, persistence, import, export, report rendering, and accessibility state | `public/app.js` |
 | Network core | Owns schema v3, normalization, validation, IPv4 and CIDR math, allocation, topology, routing, trace, migration, CSV, review heuristics, and report data | `public/network-core.js` |
