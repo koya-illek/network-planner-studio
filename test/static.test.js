@@ -68,6 +68,8 @@ test("health and lockfile release provenance match package.json", async () => {
   assert.equal(lock.packages[""].version, pkg.version, "lockfile root package must report the package.json version");
   assert.equal(health.service, pkg.name, "health must report the package name");
   assert.equal(health.version, pkg.version, "health must report the package version");
+  assert.equal(health.api, "v1", "health must point at the REST surface version");
+  assert.equal(health.mcp, "/mcp", "health must point at the MCP endpoint");
 });
 
 test("round-2 affordances stay wired: motion, touch, live errors, keyboard links, inspector close", async () => {

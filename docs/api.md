@@ -118,7 +118,8 @@ Connect an MCP client to `https://network.illek.ie/mcp`. The server implements
 the Streamable HTTP transport in stateless JSON mode:
 
 - `initialize` negotiates protocol `2025-06-18` (also accepts `2025-03-26`)
-- `tools/list` returns five tools
+- `tools/list` returns five tools; every tool declares both an `inputSchema`
+  and an `outputSchema`, and `structuredContent` conforms to that output shape
 - `tools/call` computes and returns `structuredContent`; engine rejections come
   back as tool results with `isError: true`, never as protocol errors
 - notifications are answered with `202 Accepted`; `GET`/`DELETE` return `405`;

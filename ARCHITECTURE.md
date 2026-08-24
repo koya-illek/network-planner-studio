@@ -132,7 +132,7 @@ The product is intentionally browser-first.
 | Interface | Purpose |
 | --- | --- |
 | `/` | Complete planning application |
-| `GET`, `HEAD`, or `OPTIONS /api/health` | Service, schema, and release liveness |
+| `GET`, `HEAD`, or `OPTIONS /api/health` | Service, schema and release liveness plus machine-surface locations (`api`, `mcp`) |
 | `/api/v1/*` | Versioned stateless REST computations (validate, review, route, allocation) with an OpenAPI description — see [docs/api.md](docs/api.md) |
 | `/mcp` | MCP tool server exposing the same operations to AI agents |
 | JSON import and export | Lossless versioned design exchange |

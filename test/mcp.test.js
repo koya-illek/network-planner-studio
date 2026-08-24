@@ -72,15 +72,51 @@ test("notifications are acknowledged with an empty 202", async () => {
   assert.equal(await response.text(), "");
 });
 
-test("tools/list describes five planning tools with input schemas", async () => {
+test("tools/list describes five planning tools with input and output schemas", async () => {
   const { body } = await rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" });
   const names = body.result.tools.map(entry => entry.name);
   assert.deepEqual(names, ["validate_design", "review_design", "find_route", "next_subnet", "suggest_site_range"]);
   for (const entry of body.result.tools) {
     assert.equal(entry.inputSchema.type, "object");
+    assert.equal(entry.outputSchema?.type, "object", `${entry.name} must declare its structured result shape`);
+    assert.ok(Array.isArray(entry.outputSchema.required), `${entry.name} must name its required result fields`);
     assert.ok(entry.description.length > 20, `${entry.name} needs a real description`);
     assert.ok(entry.title);
   }
+});
+
+test("structured tool results conform to their declared output schemas", async () => {
+  const { body: list } = await rpc({ jsonrpc: "2.0", id: 20, method: "tools/list" });
+  const requiredFields = new Map(list.result.tools.map(entry => [entry.name, entry.outputSchema.required]));
+  const call = async payload => {
+    const { body } = await rpc(payload);
+    assert.notEqual(body.result.isError, true);
+    return body.result.structuredContent;
+  };
+  const design = validDesign();
+  let result = await call({ jsonrpc: "2.0", id: 21, method: "tools/call", params: { name: "validate_design", arguments: { design } } });
+  for (const field of requiredFields.get("validate_design")) assert.ok(field in result);
+  assert.equal(typeof result.valid, "boolean");
+
+  result = await call({ jsonrpc: "2.0", id: 22, method: "tools/call", params: { name: "review_design", arguments: { design } } });
+  for (const field of requiredFields.get("review_design")) assert.ok(field in result);
+  assert.ok(result.summary.errors >= 0 && Array.isArray(result.issues));
+
+  result = await call({
+    jsonrpc: "2.0", id: 23, method: "tools/call",
+    params: { name: "find_route", arguments: { design, from: "hq", to: "branch" } }
+  });
+  for (const field of requiredFields.get("find_route")) assert.ok(field in result);
+  assert.equal(result.reachable, true);
+
+  result = await call({
+    jsonrpc: "2.0", id: 24, method: "tools/call",
+    params: { name: "next_subnet", arguments: { parent: "10.20.0.0/16", prefix: 24, occupied: ["10.20.0.0/24"] } }
+  });
+  assert.deepEqual(Object.keys(result), ["cidr"]);
+
+  result = await call({ jsonrpc: "2.0", id: 25, method: "tools/call", params: { name: "suggest_site_range", arguments: {} } });
+  assert.deepEqual(Object.keys(result), ["cidr"]);
 });
 
 test("tools/call returns structured content for a valid design", async () => {

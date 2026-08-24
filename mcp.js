@@ -31,7 +31,26 @@ function notificationAccepted() {
   return new Response(null, { status: 202, headers: machineResponseHeaders() });
 }
 
-const tool = (name, title, description, inputSchema) => ({ name, title, description, inputSchema });
+const tool = (name, title, description, inputSchema, outputSchema) => ({ name, title, description, inputSchema, outputSchema });
+
+// Structured results mirror the REST payloads exactly; declaring their shape
+// lets agents validate tool answers instead of string-parsing them.
+const validationIssueSchema = {
+  type: "object", required: ["path", "message"],
+  properties: { path: { type: "string" }, message: { type: "string" }, code: { type: "string" } }
+};
+const findingSchema = {
+  type: "object", required: ["severity", "title", "message"],
+  properties: {
+    severity: { type: "string", enum: ["info", "advice", "warning", "error"] },
+    title: { type: "string" }, message: { type: "string" },
+    siteId: { type: "string", description: "Present when the finding points at one site." }
+  }
+};
+const cidrResultSchema = {
+  type: "object", required: ["cidr"], additionalProperties: false,
+  properties: { cidr: { type: "string", description: "Allocated IPv4 CIDR block." } }
+};
 
 const TOOLS = [
   tool(
@@ -42,6 +61,16 @@ const TOOLS = [
       type: "object",
       required: ["design"],
       properties: { design: { type: "object", description: "A network-planner-studio/design v3 document (schema, version, sites, links)." } }
+    },
+    {
+      type: "object", required: ["valid", "design", "corrections", "errors", "warnings"],
+      properties: {
+        valid: { type: "boolean", description: "True when no corrections and no validation errors were found." },
+        design: { type: "object", description: "The canonical v3 document after normalization." },
+        corrections: { type: "array", items: { type: "string" } },
+        errors: { type: "array", items: validationIssueSchema },
+        warnings: { type: "array", items: validationIssueSchema }
+      }
     }
   ),
   tool(
@@ -52,6 +81,17 @@ const TOOLS = [
       type: "object",
       required: ["design"],
       properties: { design: { type: "object", description: "A network-planner-studio/design v3 document." } }
+    },
+    {
+      type: "object", required: ["score", "summary", "issues"],
+      properties: {
+        score: { type: "integer", minimum: 0, maximum: 100 },
+        summary: {
+          type: "object", required: ["errors", "warnings", "advice"],
+          properties: { errors: { type: "integer" }, warnings: { type: "integer" }, advice: { type: "integer" } }
+        },
+        issues: { type: "array", items: findingSchema }
+      }
     }
   ),
   tool(
@@ -65,6 +105,22 @@ const TOOLS = [
         design: { type: "object", description: "A network-planner-studio/design v3 document." },
         from: { type: "string", description: "Source site id or exact site name." },
         to: { type: "string", description: "Destination site id or exact site name." }
+      }
+    },
+    {
+      type: "object", required: ["reachable", "policyApplied", "hops", "hopIds", "links"],
+      properties: {
+        reachable: { type: "boolean" },
+        policyApplied: {
+          type: "object", required: ["topologyMode", "spokeToSpoke"],
+          properties: {
+            topologyMode: { type: "string", enum: ["custom", "hub-spoke", "mesh"] },
+            spokeToSpoke: { type: "string", enum: ["via-hub", "denied"] }
+          }
+        },
+        hops: { type: "array", items: { type: "string" }, description: "Site names along the path; empty when unreachable." },
+        hopIds: { type: "array", items: { type: "string" } },
+        links: { type: "array", items: { type: "string" }, description: "Traversed link ids." }
       }
     }
   ),
@@ -80,7 +136,8 @@ const TOOLS = [
         prefix: { type: "integer", minimum: 8, maximum: 31 },
         occupied: { type: "array", items: { type: "string" }, description: "Already-used CIDRs inside parent." }
       }
-    }
+    },
+    cidrResultSchema
   ),
   tool(
     "suggest_site_range",
@@ -92,7 +149,8 @@ const TOOLS = [
         occupied: { type: "array", items: { type: "string" }, description: "Site ranges already in use." },
         devices: { type: "integer", minimum: 1, maximum: 100000, description: "Planned primary devices; defaults to 50." }
       }
-    }
+    },
+    cidrResultSchema
   )
 ];
 

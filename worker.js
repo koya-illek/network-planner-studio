@@ -24,7 +24,9 @@ export default {
       headers.set("Cache-Control", "no-store");
       if (request.method === "OPTIONS") return new Response(null, { status: 204, headers });
       if (!["GET", "HEAD"].includes(request.method)) return Response.json({ ok: false, error: "method_not_allowed" }, { status: 405, headers });
-      const body = JSON.stringify({ ok: true, service: packageMetadata.name, version: packageMetadata.version, schema: "network-planner-studio/design", schemaVersion: 3 });
+      // Health doubles as the machine-surface directory: clients discover the
+      // API version and MCP endpoint from the same liveness probe.
+      const body = JSON.stringify({ ok: true, service: packageMetadata.name, version: packageMetadata.version, schema: "network-planner-studio/design", schemaVersion: 3, api: "v1", mcp: "/mcp" });
       headers.set("Content-Type", "application/json; charset=utf-8");
       return new Response(request.method === "HEAD" ? null : body, { status: 200, headers });
     }
