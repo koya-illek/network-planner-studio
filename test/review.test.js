@@ -208,3 +208,39 @@ test("defaultFlowPolicy encodes the trust-zone matrix", () => {
   assert.equal(defaultFlowPolicy("users", "management"), "deny");
   assert.equal(defaultFlowPolicy("users", "voice"), "restricted");
 });
+
+test("overlap findings keep strict site-pair order while tolerating unparseable ranges", () => {
+  const issues = reviewDesignIssues(base({
+    sites: [
+      site({ id: "a", name: "A", cidr: "10.1.0.0/16" }),
+      site({ id: "b", name: "B", cidr: "not-a-cidr" }),
+      site({ id: "c", name: "C", cidr: "10.1.3.0/24" }),
+      site({ id: "d", name: "D", cidr: "10.1.9.0/24" })
+    ]
+  }));
+  const overlaps = issues.filter(i => i.title === "Overlapping site ranges").map(i => i.message);
+  assert.deepEqual(overlaps, [
+    "A and C overlap. VPN routing between them will be ambiguous.",
+    "A and D overlap. VPN routing between them will be ambiguous."
+  ]);
+  const invalid = issues.find(i => i.title === "Invalid site range");
+  assert.match(invalid.message, /B does not have/);
+});
+
+test("reviewing a multi-thousand-site import stays fast and keeps isolation findings complete", () => {
+  const count = 1200;
+  const sites = Array.from({ length: count }, (_, i) => site({
+    id: `s${i}`, name: `Site ${i}`, cidr: `10.${i % 256}.${Math.floor(i / 256)}.0/24`
+  }));
+  // One long connected chain plus one hundred deliberately stranded sites.
+  const linked = Math.floor(count * 0.9);
+  const links = Array.from({ length: linked - 1 }, (_, i) => link({ id: `l${i}`, from: `s${i}`, to: `s${i + 1}` }));
+  const start = Date.now();
+  const issues = reviewDesignIssues(base({ sites, links }));
+  const elapsed = Date.now() - start;
+  const isolated = issues.filter(i => i.title === "Isolated site");
+  assert.equal(isolated.length, count - linked);
+  assert.deepEqual(isolated.map(i => i.siteId), Array.from({ length: count - linked }, (_, k) => `s${linked + k}`));
+  assert.ok(Number.isFinite(designScore(issues)));
+  assert.ok(elapsed < 1500, `review must not stall on large imports (took ${elapsed}ms)`);
+});

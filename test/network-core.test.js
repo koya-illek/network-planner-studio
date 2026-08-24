@@ -109,6 +109,73 @@ test("does not traverse a direct spoke link under via-hub policy",()=>{
   assert.deepEqual(shortestPath(sites,links,"a","b",{topologyMode:"hub-spoke",spokeToSpoke:"via-hub"}),{sites:["a","h","b"],links:["ah","hb"]});
 });
 
+test("route tracing stays deterministic when equal-length paths exist",()=>{
+  const sites=[{id:"a"},{id:"b"},{id:"c"},{id:"d"}];
+  const first=[
+    {id:"ab",from:"a",to:"b"},
+    {id:"ac",from:"a",to:"c"},
+    {id:"bd",from:"b",to:"d"},
+    {id:"cd",from:"c",to:"d"}
+  ];
+  assert.deepEqual(shortestPath(sites,first,"a","d"),{sites:["a","b","d"],links:["ab","bd"]});
+  // Reordering the link array must be the only thing that flips the winner.
+  assert.deepEqual(shortestPath(sites,[first[1],first[0],first[3],first[2]],"a","d"),{sites:["a","c","d"],links:["ac","cd"]});
+});
+
+test("route tracing matches the legacy per-dequeue scan across randomized graphs",()=>{
+  const legacy=(sites,links,from,to,options={})=>{
+    if(from===to)return{sites:[from],links:[]};
+    const byId=new Map(sites.map(site=>[site.id,site]));
+    const enforceHubSpoke=options.topologyMode==="hub-spoke"&&["denied","via-hub"].includes(options.spokeToSpoke);
+    if(enforceHubSpoke&&options.spokeToSpoke==="denied"&&byId.get(from)?.topologyRole==="spoke"&&byId.get(to)?.topologyRole==="spoke")return null;
+    const queue=[{id:from,sitePath:[from],linkPath:[]}],seen=new Set([from]);
+    while(queue.length){
+      const current=queue.shift();
+      for(const link of links.filter(candidate=>candidate.from===current.id||candidate.to===current.id)){
+        if(link.transitAllowed===false&&current.id!==from)continue;
+        const next=link.from===current.id?link.to:link.from;
+        if(seen.has(next)||!byId.has(next))continue;
+        const a=byId.get(current.id),b=byId.get(next);
+        if(enforceHubSpoke&&a?.topologyRole==="spoke"&&b?.topologyRole==="spoke")continue;
+        const candidate={id:next,sitePath:[...current.sitePath,next],linkPath:[...current.linkPath,link.id]};
+        if(next===to)return{sites:candidate.sitePath,links:candidate.linkPath};
+        seen.add(next);
+        queue.push(candidate);
+      }
+    }
+    return null;
+  };
+  let seed=7;
+  const rand=()=>{seed=(seed*1103515245+12345)>>>0;return seed/2**32};
+  for(let round=0;round<200;round++){
+    const count=3+Math.floor(rand()*8);
+    const sites=Array.from({length:count},(_,i)=>({id:`s${i}`,topologyRole:rand()<.2?"hub":rand()<.5?"spoke":"standalone"}));
+    const links=[];
+    for(let i=0,n=Math.floor(rand()*count*1.5);i<n;i++){
+      links.push({
+        id:`l${i}`,
+        from:`s${Math.floor(rand()*count)}`,
+        to:`s${Math.floor(rand()*count)}`,
+        transitAllowed:rand()>.15
+      });
+    }
+    const options=rand()<.5?{topologyMode:"hub-spoke",spokeToSpoke:rand()<.5?"via-hub":"denied"}:{topologyMode:"custom"};
+    const from=`s${Math.floor(rand()*count)}`,to=`s${Math.floor(rand()*count)}`;
+    assert.deepEqual(shortestPath(sites,links,from,to,options),legacy(sites,links,from,to,options),
+      `divergence on round ${round} (${from}->${to}, ${JSON.stringify(options)})`);
+  }
+});
+
+test("traces a long imported chain without rescanning every link per hop",()=>{
+  const count=1500;
+  const sites=Array.from({length:count},(_,i)=>({id:`s${i}`,topologyRole:i?"spoke":"hub"}));
+  const links=Array.from({length:count-1},(_,i)=>({id:`l${i}`,from:`s${i}`,to:`s${i+1}`,transitAllowed:true}));
+  const route=shortestPath(sites,links,"s0",`s${count-1}`,{topologyMode:"custom"});
+  assert.equal(route.sites.length,count);
+  assert.equal(route.sites[count-1],`s${count-1}`);
+  assert.deepEqual(route.links.slice(0,2),["l0","l1"]);
+});
+
 test("bounds malformed imported numeric fields to finite values",()=>{
   const result=migrateDesign({sites:[{
     id:"s",devices:Number.NaN,growth:"not-a-number",x:Infinity,y:"oops",vlans:[

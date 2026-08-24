@@ -345,13 +345,23 @@ export function shortestPath(sites, links, from, to, { topologyMode = "custom", 
   const byId = new Map(sites.map(site => [site.id, site]));
   const enforceHubSpoke = topologyMode === "hub-spoke" && ["denied", "via-hub"].includes(spokeToSpoke);
   if (enforceHubSpoke && spokeToSpoke === "denied" && byId.get(from)?.topologyRole === "spoke" && byId.get(to)?.topologyRole === "spoke") return null;
+  // Adjacency is built once so a dense imported design is O(V+E) per trace
+  // instead of rescanning every link for every dequeued site. Edges keep the
+  // original link order, which pins which equal-length route a BFS finds.
+  const adjacency = new Map();
+  for (const link of links) {
+    if (!byId.has(link.from) || !byId.has(link.to)) continue;
+    for (const [a, b] of [[link.from, link.to], [link.to, link.from]]) {
+      if (!adjacency.has(a)) adjacency.set(a, []);
+      adjacency.get(a).push({ next: b, link });
+    }
+  }
   const queue = [{ id: from, sitePath: [from], linkPath: [] }], seen = new Set([from]);
   while (queue.length) {
     const current = queue.shift();
-    for (const link of links.filter(candidate => candidate.from === current.id || candidate.to === current.id)) {
+    for (const { next, link } of adjacency.get(current.id) || []) {
       if (link.transitAllowed === false && current.id !== from) continue;
-      const next = link.from === current.id ? link.to : link.from;
-      if (seen.has(next) || !byId.has(next)) continue;
+      if (seen.has(next)) continue;
       const a = byId.get(current.id), b = byId.get(next);
       if (enforceHubSpoke && a?.topologyRole === "spoke" && b?.topologyRole === "spoke") continue;
       const candidate = { id: next, sitePath: [...current.sitePath, next], linkPath: [...current.linkPath, link.id] };
@@ -703,16 +713,24 @@ export function reviewDesignIssues(design) {
   const issues = [];
   for (const message of design?.importWarnings || []) issues.push(reviewIssue("warning", "Recovered design data", message));
   if (!sites.length) return [...issues, reviewIssue("info", "Start the address hierarchy", "Add a site with a parent IPv4 range and create VLANs inside it.")];
+  // Review compares every site pair, so each range is parsed once and sites
+  // are indexed by id up front; re-parsing CIDR strings per pair stalls
+  // multi-thousand-site imports on the main thread.
+  const siteById = new Map(sites.map(site => [site.id, site]));
+  const ranges = sites.map(site => parseOrIssue(site.cidr));
   const connectionCounts = new Map();
   for (const link of links) {
     connectionCounts.set(link.from, (connectionCounts.get(link.from) || 0) + 1);
     connectionCounts.set(link.to, (connectionCounts.get(link.to) || 0) + 1);
   }
   for (let i = 0; i < sites.length; i++) {
-    const site = sites[i], sp = parseOrIssue(site.cidr);
+    const site = sites[i], sp = ranges[i];
     if (!sp) issues.push(reviewIssue("error", "Invalid site range", `${site.name} does not have a valid IPv4 CIDR range.`, site.id));
     else if (!isPrivateCidr(site.cidr)) issues.push(reviewIssue("warning", "Public site address space", `${site.name} uses ${site.cidr}, which is not RFC1918 private address space. Confirm ownership and intent.`, site.id));
-    for (let j = i + 1; j < sites.length; j++) if (rangesOverlap(site.cidr, sites[j].cidr)) issues.push(reviewIssue("error", "Overlapping site ranges", `${site.name} and ${sites[j].name} overlap. VPN routing between them will be ambiguous.`, site.id));
+    for (let j = i + 1; j < sites.length; j++) {
+      const sq = ranges[j];
+      if (sp && sq && sp.network <= sq.broadcast && sq.network <= sp.broadcast) issues.push(reviewIssue("error", "Overlapping site ranges", `${site.name} and ${sites[j].name} overlap. VPN routing between them will be ambiguous.`, site.id));
+    }
     if ((connectionCounts.get(site.id) || 0) > 0 && site.wan === "single") issues.push(reviewIssue("warning", "Single WAN dependency", `${site.name} has inter-site connectivity but only one WAN path. Document the accepted outage risk.`, site.id));
     if (!site.vlans.length) issues.push(reviewIssue("warning", "No VLANs defined", `${site.name} has a parent range but no usable networks yet.`, site.id));
     const vids = new Map();
@@ -722,7 +740,7 @@ export function reviewDesignIssues(design) {
       vids.set(vlan.vid, vlan.name);
       if (!vp) issues.push(reviewIssue("error", "Invalid VLAN subnet", `${site.name} / ${vlan.name} has an invalid IPv4 subnet.`, site.id));
       else {
-        if (sp && !contains(site.cidr, vlan.cidr)) issues.push(reviewIssue("error", "VLAN outside site range", `${vlan.cidr} is not contained by ${site.name}'s ${site.cidr} allocation.`, site.id));
+        if (sp && vp && !(sp.network <= vp.network && sp.broadcast >= vp.broadcast)) issues.push(reviewIssue("error", "VLAN outside site range", `${vlan.cidr} is not contained by ${site.name}'s ${site.cidr} allocation.`, site.id));
         let capacity;
         try { capacity = endpointCapacity(vlan.cidr, Number(vlan.reserved ?? 1), { gateway: vlan.gateway }); } catch { capacity = 0; }
         if (vlan.devices > capacity) issues.push(reviewIssue("error", "Subnet over capacity", `${site.name} / ${vlan.name} needs ${vlan.devices} endpoint addresses but ${vlan.cidr} has only ${capacity} after reservations.`, site.id));
@@ -739,21 +757,27 @@ export function reviewDesignIssues(design) {
     if (site.vlans.some(v => v.role === "guest") && site.vlans.some(v => v.role === "users")) issues.push(reviewIssue("info", "Trust boundary required", `${site.name}'s guest network should be denied access to private staff and infrastructure ranges.`, site.id));
   }
   if (sites.length > 1) {
-    // Iterative flood fill: a deep imported chain must not exhaust the stack.
+    // Iterative flood fill over a prebuilt adjacency list: a deep imported
+    // chain must not exhaust the stack or rescan every link per site.
+    const neighbours = new Map();
+    for (const link of links) {
+      if (!siteById.has(link.from) || !siteById.has(link.to)) continue;
+      for (const [a, b] of [[link.from, link.to], [link.to, link.from]]) {
+        if (!neighbours.has(a)) neighbours.set(a, []);
+        neighbours.get(a).push(b);
+      }
+    }
     const visited = new Set(), stack = [sites[0].id];
     while (stack.length) {
       const id = stack.pop();
       if (visited.has(id)) continue;
       visited.add(id);
-      for (const link of links) {
-        if (link.from === id) stack.push(link.to);
-        else if (link.to === id) stack.push(link.from);
-      }
+      for (const next of neighbours.get(id) || []) stack.push(next);
     }
     for (const site of sites.filter(s => !visited.has(s.id))) issues.push(reviewIssue("warning", "Isolated site", `${site.name} is not connected to the rest of the topology.`, site.id));
   }
   for (const link of links) {
-    const a = sites.find(s => s.id === link.from), b = sites.find(s => s.id === link.to);
+    const a = siteById.get(link.from), b = siteById.get(link.to);
     if (!a || !b) continue;
     if (link.routingType === "static" && !(link.advertisedPrefixes || []).length) issues.push(reviewIssue("warning", "Static route intent is missing", `${a.name} ↔ ${b.name} uses static routing but has no documented advertised prefixes.`, a.id));
     for (const prefix of link.advertisedPrefixes || []) {
@@ -768,14 +792,14 @@ export function reviewDesignIssues(design) {
     const secondary = sites.find(s => s.id === design.policies?.secondaryHubId && s.topologyRole === "hub");
     if (design.policies?.secondaryHubId && !secondary) issues.push(reviewIssue("error", "Secondary hub is invalid", "The configured secondary hub no longer exists or no longer has the hub role."));
     for (const spoke of spokes) {
-      const hub = sites.find(s => s.id === spoke.hubId && s.topologyRole === "hub");
-      if (!hub) issues.push(reviewIssue("error", "Spoke has no valid hub", `${spoke.name} is marked as a spoke but has no valid hub assignment.`, spoke.id));
+      const hub = siteById.get(spoke.hubId);
+      if (!hub || hub.topologyRole !== "hub") issues.push(reviewIssue("error", "Spoke has no valid hub", `${spoke.name} is marked as a spoke but has no valid hub assignment.`, spoke.id));
       else if (!links.some(l => (l.from === spoke.id && l.to === hub.id) || (l.to === spoke.id && l.from === hub.id))) issues.push(reviewIssue("error", "Spoke is not connected to hub", `${spoke.name} is assigned to ${hub.name} but no connection exists.`, spoke.id));
       if (secondary && !links.some(l => (l.from === spoke.id && l.to === secondary.id) || (l.to === spoke.id && l.from === secondary.id))) issues.push(reviewIssue("warning", "Secondary hub path is missing", `${spoke.name} is not connected to secondary hub ${secondary.name}.`, spoke.id));
       if (spoke.internetBreakout === "hub" && !links.some(l => ((l.from === spoke.id && l.to === spoke.hubId) || (l.to === spoke.id && l.from === spoke.hubId)) && l.defaultRoute)) issues.push(reviewIssue("warning", "Central breakout lacks default route", `${spoke.name} uses hub internet breakout but its hub link does not advertise a default route.`, spoke.id));
     }
     for (const link of links) {
-      const a = sites.find(s => s.id === link.from), b = sites.find(s => s.id === link.to);
+      const a = siteById.get(link.from), b = siteById.get(link.to);
       if (a?.topologyRole === "spoke" && b?.topologyRole === "spoke") issues.push(reviewIssue("warning", "Direct spoke link conflicts with policy", `${a.name} and ${b.name} are directly connected even though spoke traffic is ${design.policies?.spokeToSpoke}.`, a.id));
     }
   }
