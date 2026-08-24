@@ -1,4 +1,4 @@
-import {SCHEMA_ID,SCHEMA_VERSION,ENUMS,parseCidr,parseRoutePrefix,rangesOverlap,contains,firstUsable,endpointCapacity,defaultDhcpPool,validateGateway,validateDhcpPool,prefixForDevices,nextSubnet,suggestSiteRange as suggestSiteRangeCore,reviewDesignIssues,designScore,defaultFlowPolicy,guardCsvCell,unguardCsvCell,parseCsvRows,shortestPath,migrateDesign,createSite,createVlan,createLink} from "./network-core.js";
+import {SCHEMA_ID,SCHEMA_VERSION,ENUMS,DesignValidationError,parseCidr,parseRoutePrefix,rangesOverlap,contains,firstUsable,endpointCapacity,defaultDhcpPool,validateGateway,validateDhcpPool,prefixForDevices,nextSubnet,suggestSiteRange as suggestSiteRangeCore,reviewDesignIssues,designScore,defaultFlowPolicy,guardCsvCell,unguardCsvCell,parseCsvRows,shortestPath,migrateDesign,createSite,createVlan,createLink} from "./network-core.js";
 
 const STORAGE_KEY = "network-planner-studio.v1";
 const LIBRARY_KEY = "network-planner-studio.projects.v1";
@@ -136,7 +136,9 @@ function showHome(){
   selected=null;
   $("#workspace").classList.add("hidden");
   $("#welcome").classList.remove("hidden");
-  $("#continue-design").classList.toggle("hidden",!state.sites.length);
+  // A named design with no sites yet is still real work; only a blank
+  // state should hide the way back into it.
+  $("#continue-design").classList.toggle("hidden",!state.mode);
   window.scrollTo({top:0,behavior:prefersReducedMotion.matches?"auto":"smooth"});
 }
 
@@ -285,7 +287,12 @@ function renderReview(){
   $("#issue-count").textContent=errors+warnings;$("#issue-count").classList.toggle("has-errors",errors+warnings>0);
   $("#review-score").innerHTML=`<div class="score-ring" role="img" aria-label="Design score ${score} out of 100">${score}</div><div><h2>${errors?`${errors} blocking issue${errors===1?"":"s"} found`:warnings?`${warnings} design risk${warnings===1?"":"s"} to review`:"The foundations look healthy"}</h2><p>${errors?"Resolve address conflicts before implementation or connecting sites.":"Recommendations remain editable; document intentional exceptions."}</p></div>`;
   const assumptions=(state.assumptions||[]).map(message=>({severity:"info",title:"Design assumption",message}));
-  $("#review-list").innerHTML=[...issues,...assumptions].map(i=>`<article class="review-item ${i.severity}"><span class="review-icon">${i.severity==="error"?"!":i.severity==="warning"?"△":"✓"}</span><div><h3>${escapeHtml(i.title)}</h3><p>${escapeHtml(i.message)}</p></div><small>${i.severity}</small></article>`).join("");
+  $("#review-list").innerHTML=[...issues,...assumptions].map(i=>{
+    // Findings that point at a site can jump straight to it: a review is a
+    // to-do list, not just prose.
+    const site=i.siteId&&state.sites.find(s=>s.id===i.siteId);
+    return `<article class="review-item ${i.severity}"><span class="review-icon">${i.severity==="error"?"!":i.severity==="warning"?"△":"✓"}</span><div><h3>${escapeHtml(i.title)}</h3><p>${escapeHtml(i.message)}</p></div><div class="review-side"><small>${i.severity}</small>${site?`<button class="button ghost review-locate" data-review-goto="${site.id}" type="button" aria-label="Show ${escapeHtml(site.name)} on the topology canvas">Locate</button>`:""}</div></article>`
+  }).join("");
 }
 function renderTrafficPolicy(){
   const root=$("#flow-matrix");if(!root)return;const roles=[...new Set(state.sites.flatMap(s=>s.vlans.map(v=>v.role)))];
@@ -569,6 +576,8 @@ document.addEventListener("click",e=>{
   const delLink=e.target.closest("[data-delete-link]");if(delLink&&confirm("Delete this connection?")){pushHistory();state.links=state.links.filter(l=>l.id!==delLink.dataset.deleteLink);selected=null;touch();$("#inspector").focus();return}
   const trace=e.target.closest("[data-trace-link]");if(trace)return animateTrace(trace.dataset.traceLink);
   if(e.target.closest("#close-trace"))return stopTrace();
+  const locate=e.target.closest("[data-review-goto]");
+  if(locate){const id=locate.dataset.reviewGoto;if(state.sites.some(s=>s.id===id)){activateView("topology");selected={type:"site",id};render();$(`.topology-node[data-site="${CSS.escape(id)}"]`)?.focus()}return}
   if(e.target.closest("#rerun-review")){reviewCache=null;renderReview();showToast("Design review updated")}
 });
 document.addEventListener("keydown",e=>{
@@ -612,7 +621,14 @@ $("#recommend-form").addEventListener("change",()=>buildRecommendation());
 $("#file-input").addEventListener("change",async e=>{
   const file=e.target.files[0];if(!file)return;
   if(file.size>IMPORT_MAX_BYTES){showToast(`Import failed: ${file.name} is larger than 10 MB`);e.target.value="";return}
-  try{const text=await file.text(),isCsv=file.name.toLowerCase().endsWith(".csv"),raw=isCsv?designFromCsv(text):JSON.parse(text.replace(/^\uFEFF/,"")),imported=isCsv?raw:migrateDesign(raw,{strict:true});pushHistory();state=imported;state.mode="imported";selected=null;saveState();enterWorkspace();render();showToast(`${isCsv?"CSV":"Design"} imported and validated`)}catch(err){showToast(`Import failed: ${err.message}`)}e.target.value="";
+  try{const text=await file.text(),isCsv=file.name.toLowerCase().endsWith(".csv"),raw=isCsv?designFromCsv(text):JSON.parse(text.replace(/^\uFEFF/,"")),imported=isCsv?raw:migrateDesign(raw,{strict:true});pushHistory();state=imported;state.mode="imported";selected=null;saveState();enterWorkspace();render();showToast(`${isCsv?"CSV":"Design"} imported and validated`)}
+  catch(err){
+    // A rejected import reports its first issue, but a large rejected design
+    // must not silently hide how much else was wrong with it.
+    const more=err instanceof DesignValidationError&&err.errors.length>1?` (+${err.errors.length-1} more issues not shown)`:"";
+    showToast(`Import failed: ${err.message}${more}`)
+  }
+  e.target.value="";
 });
 function designFromCsv(text){
   const rows=parseCsvRows(text).filter(row=>row.some(value=>value.trim()));if(rows.length<2)throw new Error("CSV must include a header and at least one address record");

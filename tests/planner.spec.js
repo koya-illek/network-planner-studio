@@ -612,3 +612,57 @@ test("undo and redo answer their keyboard shortcuts", async ({ page }) => {
   await page.keyboard.press("Control+z");
   await expect.poll(devices).toBe(100);
 });
+
+test("a review finding can jump straight to its site on the canvas", async ({ page }) => {
+  await page.locator('[data-view="review"]').click();
+  const first = page.locator("[data-review-goto]").first();
+  await expect(first).toBeVisible();
+  const label = await first.getAttribute("aria-label");
+  expect(label).toMatch(/^Show .+ on the topology canvas$/);
+  await first.click();
+  await expect(page.locator("#topology-view")).toBeVisible();
+  await expect(page.locator("#topology-view")).not.toBeHidden();
+  const selected = page.locator(".topology-node.selected");
+  await expect(selected).toBeVisible();
+  await expect(selected).toBeFocused();
+  await expect(page.locator("#inspector h2")).toBeVisible();
+  // Escape from the located node clears the selection like any other path.
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".topology-node.selected")).toHaveCount(0);
+});
+
+test("a rejected multi-issue import says how many problems it hides", async ({ page }) => {
+  const design = {
+    schema: "network-planner-studio/design", version: 3, name: "Broken import", mode: null,
+    topologyMode: "custom", policies: { spokeToSpoke: "via-hub", centralizedInspection: false }, flowPolicies: {},
+    sites: [
+      { id: "a", name: "A", type: "office", cidr: "10.1.0.0/16", devices: 1, wan: "single", growth: 30, x: 20, y: 20,
+        topologyRole: "standalone", internetBreakout: "local",
+        vlans: [{ id: "v1", name: "Staff", vid: 10, role: "users", devices: 1, cidr: "10.1.1.0/24", gateway: "192.0.2.1",
+                  dhcpEnabled: true, reserved: 1, dhcpStart: "10.1.1.2", dhcpEnd: "10.1.1.254" }] },
+      { id: "b", name: "B", type: "office", cidr: "10.999.0.0/33", devices: 1, wan: "single", growth: 30, x: 60, y: 20,
+        topologyRole: "standalone", internetBreakout: "local", vlans: [] }
+    ],
+    links: []
+  };
+  await page.locator("#file-input").setInputFiles({
+    name: "broken.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(design))
+  });
+  const toast = page.locator("#toast");
+  await expect(toast).toContainText("Import failed:");
+  await expect(toast).toContainText(/more issues not shown/);
+  // The rejected file must not have replaced the loaded design.
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("network-planner-studio.v1")).name)).toBe("Illek example network");
+});
+
+test("a named design with no sites yet stays reachable from home", async ({ page }) => {
+  await page.locator("#home-button").click();
+  await page.locator('[data-start="new"]').click();
+  await expect(page.locator("#site-dialog")).toBeVisible();
+  await page.locator('#site-dialog button:has-text("Cancel")').click();
+  await page.locator("#home-button").click();
+  const cont = page.locator("#continue-design");
+  await expect(cont).toBeVisible();
+  await cont.click();
+  await expect(page.locator("#workspace")).toBeVisible();
+});

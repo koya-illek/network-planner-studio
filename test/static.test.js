@@ -229,3 +229,21 @@ test("iteration-9 keeps interrupted gestures honest", async () => {
   assert.match(app, /function restoreHistory\([\s\S]*?nudgeBurst=\{siteId:null,at:0\}/, "undo and redo must close the current nudge burst");
   assert.ok(!app.includes("setTimeout(saveState,220)"), "nudge saves must flow through the shared touch pipeline");
 });
+
+test("round-3 workspace loop: findings locate sites, imports count issues, zero-site designs stay reachable", async () => {
+  const app = await readFile(new URL("public/app.js", root), "utf8");
+  const css = await readFile(new URL("public/styles.css", root), "utf8");
+  const core = await readFile(new URL("public/network-core.js", root), "utf8");
+  // Review findings that carry a siteId offer a jump-to-site affordance and
+  // the handler selects the site and focuses its canvas node.
+  assert.ok(app.includes('data-review-goto="${site.id}"'), "site-scoped findings must offer a locate affordance");
+  assert.match(app, /data-review-goto="\$\{CSS\.escape\(id\)\}"|\.topology-node\[data-site="\$\{CSS\.escape\(id\)\}"\]/, "the locate handler must resolve the escaped site id");
+  assert.ok(app.includes('activateView("topology");selected={type:"site",id};render();'), "locating a finding must land on the topology view with the site selected");
+  // Rejected imports reveal the scale of what was hidden behind the first error.
+  assert.ok(core.includes("export class DesignValidationError"), "the core owns the structured validation error type");
+  assert.ok(app.includes("more issues not shown"), "a rejected import must say how many extra issues exist");
+  // A named design without sites must remain continuable from home.
+  assert.ok(app.includes('$("#continue-design").classList.toggle("hidden",!state.mode)'), "home reachability keys on design existence, not site count");
+  assert.match(css, /\.review-locate\{min-height:32px/);
+  assert.match(css, /\.review-locate\{min-height:44px\}/, "coarse pointers need a full-size locate target");
+});
