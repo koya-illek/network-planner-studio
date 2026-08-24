@@ -522,7 +522,9 @@ test("keeps focus recoverable when a background save-render lands during a dialo
   await page.evaluate(() => {
     window.__inspectorReplacements = 0;
     new MutationObserver(records => { window.__inspectorReplacements += records.length; }).observe(document.querySelector("#inspector"), { childList: true });
-    document.querySelector("[data-flow]").click();
+    // A nudge is an edit from the topology surface: it must land through the
+    // debounced pipeline even while this dialog holds the interaction.
+    document.querySelector(".topology-node").dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
   });
   await page.waitForTimeout(350);
   await page.keyboard.press("Escape");

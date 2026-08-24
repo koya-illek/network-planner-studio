@@ -225,11 +225,15 @@ test("iteration-8 never proposes an occupied VLAN ID", async () => {
 
 test("iteration-9 keeps interrupted gestures honest", async () => {
   const app = await readFile(new URL("public/app.js", root), "utf8");
-  assert.match(app, /if\(!commit\)\{drag\.site\.x=drag\.x;drag\.site\.y=drag\.y;if\(drag\.moved\)renderCanvas\(\)\}/, "a cancelled drag must restore the pre-drag coordinates before dropping the history entry");
+  assert.match(app, /if\(!commit\)\{drag\.site\.x=drag\.x;drag\.site\.y=drag\.y;if\(drag\.moved\)moveNode\(drag\.site\)\}/, "a cancelled drag must restore the pre-drag coordinates before dropping the history entry");
   assert.match(app, /else if\(drag&&drag\.moved\)touch\(\)/, "a moved drag swallowed by a pinch must settle through the save pipeline");
   assert.match(app, /nudgeBurst\.siteId!==site\.id\|\|now-nudgeBurst\.at>600/, "keyboard nudges must coalesce only for the same node in one burst");
   assert.match(app, /function restoreHistory\([\s\S]*?nudgeBurst=\{siteId:null,at:0\}/, "undo and redo must close the current nudge burst");
   assert.ok(!app.includes("setTimeout(saveState,220)"), "nudge saves must flow through the shared touch pipeline");
+  // Drags and nudges mutate one node plus its incident links; a full canvas
+  // rebuild per pointer frame is what made large topologies undraggable.
+  assert.ok(app.includes(");moveNode(drag.site)"), "pointer-move frames must not rebuild the whole canvas");
+  assert.match(app, /moveNode\(site\);\s*touch\(\);/, "keyboard nudge steps must reuse the surgical move path");
 });
 
 test("round-3 workspace loop: findings locate sites, imports count issues, zero-site designs stay reachable", async () => {
@@ -240,7 +244,10 @@ test("round-3 workspace loop: findings locate sites, imports count issues, zero-
   // the handler selects the site and focuses its canvas node.
   assert.ok(app.includes('data-review-goto="${site.id}"'), "site-scoped findings must offer a locate affordance");
   assert.match(app, /data-review-goto="\$\{CSS\.escape\(id\)\}"|\.topology-node\[data-site="\$\{CSS\.escape\(id\)\}"\]/, "the locate handler must resolve the escaped site id");
-  assert.ok(app.includes('activateView("topology");selected={type:"site",id};render();'), "locating a finding must land on the topology view with the site selected");
+  assert.ok(app.includes('activateView("topology");select({type:"site",id});'), "locating a finding must land on the topology view with the site selected");
+  // Selection is a class-and-inspector update, not a structural re-render.
+  assert.ok(app.includes("for(const node of $$(\".topology-node\"))node.classList.toggle(\"selected\",node.dataset.site===sid);"), "select() must repaint canvas selection without rebuilding nodes");
+  assert.match(app, /function select\(entity\)\{/, "clicks must route through the selection fast path");
   // Rejected imports reveal the scale of what was hidden behind the first error.
   assert.ok(core.includes("export class DesignValidationError"), "the core owns the structured validation error type");
   assert.ok(app.includes("more issues not shown"), "a rejected import must say how many extra issues exist");

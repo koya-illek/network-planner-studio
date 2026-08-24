@@ -173,7 +173,7 @@ function render(){
   stopTrace();
   reviewCache=null;
   $("#project-name-button").textContent=state.name;
-  renderSiteList();renderCanvas();renderInspector();renderAddressPlan();renderReview();renderTrafficPolicy();renderReport();
+  renderSiteList();renderCanvas();renderInspector();renderReviewBadge();
   const vlanCount=state.sites.reduce((n,s)=>n+s.vlans.length,0);
   const addressCount=state.sites.reduce((n,s)=>n+s.vlans.reduce((sum,v)=>sum+(safeCapacity(v)||0),0),0);
   $("#site-total").textContent=`${state.sites.length} site${state.sites.length===1?"":"s"}`;
@@ -182,14 +182,32 @@ function render(){
   $("#topology-mode").textContent=state.topologyMode==="hub-spoke"?"Hub & spoke":state.topologyMode==="mesh"?"Mesh":"Custom";
   updateHistoryButtons();
   $("#empty-canvas").classList.toggle("hidden",state.sites.length>0);
+  // Hidden tabs hold the heaviest DOM in the app (address table, report
+  // sheets); at imported scale rebuilding them per edit froze the canvas.
+  // They are marked stale here and built when their tab activates.
+  markViewsStale();
+  buildView(currentView());
   restoreFocus(keeper);
 }
+
+// Deferred view panels: build-on-activation with staleness invalidation.
+const VIEW_PANELS={addressing:renderAddressPlan,review:renderReviewPanel,policy:renderTrafficPolicy,report:renderReport};
+let staleViews=new Set(Object.keys(VIEW_PANELS));
+function markViewsStale(){for(const view of Object.keys(VIEW_PANELS))staleViews.add(view)}
+function buildView(view){if(!staleViews.has(view))return;VIEW_PANELS[view]();staleViews.delete(view)}
+// Print reads the report view regardless of the active tab, so it must be
+// fresh even when Ctrl+P bypasses the report tab entirely.
+window.addEventListener("beforeprint",()=>buildView("report"));
 function activateView(view, moveFocus=false){
   $$('[data-view]').forEach(button=>{const active=button.dataset.view===view;button.classList.toggle("active",active);button.setAttribute("aria-selected",String(active));button.tabIndex=active?0:-1});
   $$(".view").forEach(panel=>{const active=panel.id===`${view}-view`;panel.classList.toggle("active",active);panel.hidden=!active});
+  // A stale tab is rebuilt now that it is measurable/visible, mirroring how
+  // the canvas defers its geometry until the topology view can be measured.
+  buildView(view);
   if(view==="topology"&&canvasDirty){const keeper=focusKeeper();renderCanvas();restoreFocus(keeper)}
   if(moveFocus)document.querySelector(`[data-view="${view}"]`)?.focus();
 }
+function currentView(){return $(".view.active")?.id.replace("-view","")||"topology"}
 
 function renderSiteList(){
   const root=$("#site-list");root.innerHTML="";
@@ -206,29 +224,57 @@ function renderSiteList(){
   $("#guidance-summary").textContent=guidance?guidance.message:"The address hierarchy is valid and has healthy capacity.";
 }
 
+function canvasGeometry(){
+  const canvas=$("#canvas"),w=canvas.clientWidth||800,h=canvas.clientHeight||600;
+  return{w,h,nodeWidth:w<600?150:180};
+}
+function nodePoint(site,{w,h,nodeWidth}){
+  const left=Math.max(8,Math.min(w-nodeWidth-8,site.x/100*w)),top=Math.max(8,Math.min(h-88,site.y/100*h));
+  return{left,top,x:left+nodeWidth/2,y:top+35};
+}
+function linkGeometry(a,b,geom){
+  const ap=nodePoint(a,geom),bp=nodePoint(b,geom),x1=ap.x,y1=ap.y,x2=bp.x,y2=bp.y;
+  return{d:`M ${x1} ${y1} C ${(x1+x2)/2} ${y1}, ${(x1+x2)/2} ${y2}, ${x2} ${y2}`,midX:(x1+x2)/2,midY:(y1+y2)/2};
+}
+
 function renderCanvas(){
   // The canvas measures its own box; rendering while the topology view is
   // hidden would bake 800x600 fallback geometry into nodes and the SVG
   // viewBox. Defer instead and flush on view activation.
   if($("#topology-view").hidden||$("#workspace").classList.contains("hidden")){canvasDirty=true;return}
   canvasDirty=false;
-  const layer=$("#node-layer"),svg=$("#link-layer"),canvas=$("#canvas");
+  const layer=$("#node-layer"),svg=$("#link-layer"),geom=canvasGeometry();
   layer.innerHTML="";svg.innerHTML="";
-  const w=canvas.clientWidth||800,h=canvas.clientHeight||600;
-  const nodeWidth=w<600?150:180;
-  const point=site=>{const left=Math.max(8,Math.min(w-nodeWidth-8,site.x/100*w)),top=Math.max(8,Math.min(h-88,site.y/100*h));return{left,top,x:left+nodeWidth/2,y:top+35}};
-  svg.setAttribute("viewBox",`0 0 ${w} ${h}`);
+  svg.setAttribute("viewBox",`0 0 ${geom.w} ${geom.h}`);
   for(const link of state.links){
     const a=state.sites.find(s=>s.id===link.from),b=state.sites.find(s=>s.id===link.to);if(!a||!b)continue;
-    const ap=point(a),bp=point(b),x1=ap.x,y1=ap.y,x2=bp.x,y2=bp.y;
-    const path=`M ${x1} ${y1} C ${(x1+x2)/2} ${y1}, ${(x1+x2)/2} ${y2}, ${x2} ${y2}`;
-    svg.insertAdjacentHTML("beforeend",`<path id="route-${link.id}" d="${path}" class="link ${link.resilience==="dual"?"dual":""}"/><path d="${path}" class="link-hit" data-link="${link.id}" tabindex="0" role="button" aria-label="${escapeHtml(`${a.name} to ${b.name}: ${linkLabel(link).toLowerCase()}, ${link.resilience==="dual"?"redundant paths":"single path"}`)}"/><text class="link-label" x="${(x1+x2)/2}" y="${(y1+y2)/2-7}" text-anchor="middle">${linkLabel(link)}</text>`);
+    const shape=linkGeometry(a,b,geom);
+    svg.insertAdjacentHTML("beforeend",`<path id="route-${link.id}" d="${shape.d}" class="link ${link.resilience==="dual"?"dual":""}"/><path d="${shape.d}" class="link-hit" data-link="${link.id}" tabindex="0" role="button" aria-label="${escapeHtml(`${a.name} to ${b.name}: ${linkLabel(link).toLowerCase()}, ${link.resilience==="dual"?"redundant paths":"single path"}`)}"/><text class="link-label" data-link="${link.id}" x="${shape.midX}" y="${shape.midY-7}" text-anchor="middle">${linkLabel(link)}</text>`);
   }
   for(const site of state.sites){
-    const node=document.createElement("div"),position=point(site),health=siteHealth(site);node.className=`topology-node role-${site.topologyRole||"standalone"} ${selected?.type==="site"&&selected.id===site.id?"selected":""}`;node.dataset.site=site.id;node.tabIndex=0;node.setAttribute("role","button");node.setAttribute("aria-label",`${site.name}, ${site.topologyRole||"standalone"} site, ${site.cidr}${health?`, ${healthWord(health)}`:""}`);
-    node.style.left=`${position.left}px`;node.style.top=`${position.top}px`;node.style.width=`${nodeWidth}px`;
+    const node=document.createElement("div"),position=nodePoint(site,geom),health=siteHealth(site);node.className=`topology-node role-${site.topologyRole||"standalone"} ${selected?.type==="site"&&selected.id===site.id?"selected":""}`;node.dataset.site=site.id;node.tabIndex=0;node.setAttribute("role","button");node.setAttribute("aria-label",`${site.name}, ${site.topologyRole||"standalone"} site, ${site.cidr}${health?`, ${healthWord(health)}`:""}`);
+    node.style.left=`${position.left}px`;node.style.top=`${position.top}px`;node.style.width=`${geom.nodeWidth}px`;
     node.innerHTML=`<div class="node-head"><span class="node-icon">${site.topologyRole==="hub"?"HUB":TYPE_ICONS[site.type]||"ST"}</span><span class="node-copy"><strong>${escapeHtml(site.name)}</strong><small>${escapeHtml(site.cidr)} · ${escapeHtml(site.topologyRole||"standalone")}</small></span></div><div class="node-foot"><span><i class="health-dot ${health}"></i>${health?`<span class="health-flag ${health}">${health==="error"?"Errors":"Risks"}</span>`:""}${site.vlans.length} VLAN${site.vlans.length===1?"":"s"}</span><span>${site.devices} devices</span></div>`;
     layer.append(node);
+  }
+}
+// A drag or keyboard nudge moves exactly one node and its incident links.
+// Rebuilding every node and label per pointer frame made large imported
+// topologies undraggable; this mutates only what the move changes.
+function moveNode(site){
+  const geom=canvasGeometry(),layer=$("#node-layer"),svg=$("#link-layer");
+  const node=layer.querySelector(`.topology-node[data-site="${CSS.escape(site.id)}"]`);
+  if(!node)return;
+  const position=nodePoint(site,geom);
+  node.style.left=`${position.left}px`;node.style.top=`${position.top}px`;
+  for(const link of state.links){
+    if(link.from!==site.id&&link.to!==site.id)continue;
+    const other=state.sites.find(s=>s.id===(link.from===site.id?link.to:link.from));if(!other)continue;
+    const shape=linkGeometry(site,other,geom);
+    svg.querySelector(`path[id="route-${link.id}"]`)?.setAttribute("d",shape.d);
+    svg.querySelector(`.link-hit[data-link="${link.id}"]`)?.setAttribute("d",shape.d);
+    const label=svg.querySelector(`.link-label[data-link="${link.id}"]`);
+    if(label){label.setAttribute("x",shape.midX);label.setAttribute("y",shape.midY-7)}
   }
 }
 // Health must not be a colour-only signal: the flag word reaches sighted
@@ -236,6 +282,20 @@ function renderCanvas(){
 function healthWord(health){return health==="error"?"blocking issues":health==="warning"?"risks to review":""}
 function linkLabel(link){return link.type==="vpn"?"VPN":link.type==="private"?"PRIVATE WAN":link.type==="peering"?"PEERING":"INTERNET"}
 function siteHealth(site){const issues=reviewDesign().filter(i=>i.siteId===site.id);return issues.some(i=>i.severity==="error")?"error":issues.some(i=>i.severity==="warning")?"warning":""}
+
+// Selecting is not a structural change: it moves classes and the inspector.
+// Routing clicks through this fast path instead of render() keeps selection
+// instant at imported scale, where a full pass rebuilds thousands of nodes.
+function select(entity){
+  stopTrace();
+  selected=entity;
+  const keeper=focusKeeper();
+  renderSiteList();
+  const sid=entity?.type==="site"?entity.id:null;
+  for(const node of $$(".topology-node"))node.classList.toggle("selected",node.dataset.site===sid);
+  renderInspector();
+  restoreFocus(keeper);
+}
 
 function renderInspector(){
   const root=$("#inspector");
@@ -281,10 +341,13 @@ let reviewCache=null;
 // The heuristics live in the core model so the API and MCP surfaces report
 // exactly the same findings as this workspace.
 function reviewDesign(){if(reviewCache)return reviewCache;return reviewCache=reviewDesignIssues(state)}
-function renderReview(){
+function renderReviewBadge(){
+  const issues=reviewDesign(),problems=issues.filter(i=>i.severity==="error"||i.severity==="warning").length;
+  $("#issue-count").textContent=problems;$("#issue-count").classList.toggle("has-errors",problems>0);
+}
+function renderReviewPanel(){
   const issues=reviewDesign(),errors=issues.filter(i=>i.severity==="error").length,warnings=issues.filter(i=>i.severity==="warning").length;
   const score=designScore(issues);
-  $("#issue-count").textContent=errors+warnings;$("#issue-count").classList.toggle("has-errors",errors+warnings>0);
   $("#review-score").innerHTML=`<div class="score-ring" role="img" aria-label="Design score ${score} out of 100">${score}</div><div><h2>${errors?`${errors} blocking issue${errors===1?"":"s"} found`:warnings?`${warnings} design risk${warnings===1?"":"s"} to review`:"The foundations look healthy"}</h2><p>${errors?"Resolve address conflicts before implementation or connecting sites.":"Recommendations remain editable; document intentional exceptions."}</p></div>`;
   const assumptions=(state.assumptions||[]).map(message=>({severity:"info",title:"Design assumption",message}));
   $("#review-list").innerHTML=[...issues,...assumptions].map(i=>{
@@ -533,7 +596,7 @@ document.addEventListener("click",e=>{
   if(utilityMenu?.open&&!utilityMenu.contains(e.target))utilityMenu.open=false;
   if(utilityCommand&&!utilityCommand.disabled)queueMicrotask(()=>{utilityMenu.open=false});
   const closeDialog=e.target.closest("[data-close-dialog]");if(closeDialog)return closeDialog.closest("dialog").close();
-  const closeInspector=e.target.closest("[data-inspector-close]");if(closeInspector){selected=null;render();$("#inspector").focus();return}
+  const closeInspector=e.target.closest("[data-inspector-close]");if(closeInspector){select(null);$("#inspector").focus();return}
   if(e.target.closest("#home-button,.brand")){e.preventDefault();return showHome()}
   if(e.target.closest("#continue-design")){state.mode=state.mode||"existing";saveState();enterWorkspace();render();return}
   if(e.target.closest("#undo-button"))return restoreHistory(undoStack,redoStack);
@@ -542,7 +605,7 @@ document.addEventListener("click",e=>{
   if(e.target.closest("#projects-button,#welcome-projects"))return openProjects();
   if(e.target.closest("#duplicate-project"))return duplicateProject();
   if(e.target.closest("#new-project"))return newProject();
-  if(e.target.closest("#print-report"))return window.print();
+  if(e.target.closest("#print-report")){buildView("report");return window.print()}
   const openProject=e.target.closest("[data-open-project]");if(openProject){const project=loadLibrary()[openProject.dataset.openProject];if(project){state=reviveDesign(project);selected=null;undoStack=[];redoStack=[];nudgeBurst={siteId:null,at:0};saveState();$("#projects-dialog").close();enterWorkspace();render();showToast(`${state.name} opened`)}return}
   const deleteProject=e.target.closest("[data-delete-project]");if(deleteProject&&confirm("Delete this locally saved design?")){const library=loadLibrary();delete library[deleteProject.dataset.deleteProject];storageSet(LIBRARY_KEY,JSON.stringify(library));renderProjectLibrary();showToast("Design deleted");return}
   const recommendVlan=e.target.closest("[data-recommend-vlan]");if(recommendVlan)return openRecommendDialog("vlan",recommendVlan.dataset.recommendVlan);
@@ -557,9 +620,11 @@ document.addEventListener("click",e=>{
   const startButton=e.target.closest("[data-start]");if(startButton)return start(startButton.dataset.start);
   if(e.target.closest("#add-site-top,#add-site-side,#empty-add-site"))return openSiteDialog();
   const add=e.target.closest("[data-add-vlan],[data-inspector-add-vlan]");if(add)return openVlanDialog(add.dataset.addVlan||add.dataset.inspectorAddVlan);
-  const site=e.target.closest("[data-site]");if(site&&!e.target.closest("[data-add-vlan]")){selected={type:"site",id:site.dataset.site};setMobileSites(false);render();return}
-  const vlanEl=e.target.closest("[data-vlan]");if(vlanEl){selected={type:"vlan",id:vlanEl.dataset.vlan};setMobileSites(false);render();return}
-  const link=e.target.closest("[data-link]");if(link){selected={type:"link",id:link.dataset.link};render();return}
+  // The drawer must close before selection repaints, so focus can fall back
+  // to its opener when the chosen row disappears with it.
+  const site=e.target.closest("[data-site]");if(site&&!e.target.closest("[data-add-vlan]")){setMobileSites(false);select({type:"site",id:site.dataset.site});return}
+  const vlanEl=e.target.closest("[data-vlan]");if(vlanEl){setMobileSites(false);select({type:"vlan",id:vlanEl.dataset.vlan});return}
+  const link=e.target.closest("[data-link]");if(link){select({type:"link",id:link.dataset.link});return}
   const view=e.target.closest("[data-view]");if(view){activateView(view.dataset.view);return}
   const tool=e.target.closest("[data-tool]");if(tool){currentTool=tool.dataset.tool;$$("[data-tool]").forEach(b=>b.classList.toggle("active",b===tool));if(currentTool==="connect")openConnectDialog(selected?.type==="site"?selected.id:null);if(currentTool==="trace")openTraceDialog();return}
   if(e.target.closest("#project-name-button")){$("#name-form").elements.name.value=state.name;$("#name-form").elements.assumptions.value=(state.assumptions||[]).join("\n");$("#name-dialog").showModal();return}
@@ -577,15 +642,15 @@ document.addEventListener("click",e=>{
   const trace=e.target.closest("[data-trace-link]");if(trace)return animateTrace(trace.dataset.traceLink);
   if(e.target.closest("#close-trace"))return stopTrace();
   const locate=e.target.closest("[data-review-goto]");
-  if(locate){const id=locate.dataset.reviewGoto;if(state.sites.some(s=>s.id===id)){activateView("topology");selected={type:"site",id};render();$(`.topology-node[data-site="${CSS.escape(id)}"]`)?.focus()}return}
-  if(e.target.closest("#rerun-review")){reviewCache=null;renderReview();showToast("Design review updated")}
+  if(locate){const id=locate.dataset.reviewGoto;if(state.sites.some(s=>s.id===id)){activateView("topology");select({type:"site",id});$(`.topology-node[data-site="${CSS.escape(id)}"]`)?.focus()}return}
+  if(e.target.closest("#rerun-review")){reviewCache=null;staleViews.add("review");buildView("review");showToast("Design review updated")}
 });
 document.addEventListener("keydown",e=>{
   if(e.key==="Escape"){
     const menu=$("#utility-menu");
     if(menu?.open){menu.open=false;menu.querySelector("summary").focus();return}
     // Escape is the keyboard counterpart of the inspector close button.
-    if(!$("dialog[open]")&&selected){selected=null;render();$("#inspector").focus()}
+    if(!$("dialog[open]")&&selected){select(null);$("#inspector").focus()}
   }
   // Undo and redo belong to the editor, not to text fields: while typing or
   // inside a dialog the native input undo must keep working.
@@ -607,11 +672,11 @@ document.addEventListener("keydown",e=>{
     if(e.key==="ArrowRight")site.x=Math.min(82,site.x+2);
     if(e.key==="ArrowUp")site.y=Math.max(0,site.y-2);
     if(e.key==="ArrowDown")site.y=Math.min(84,site.y+2);
-    renderCanvas();$(`.topology-node[data-site="${site.id}"]`)?.focus();
+    moveNode(site);
     touch();
     return;
   }
-  if((node||row||hit)&&!e.target.closest?.("button,a,input,select,textarea")&&["Enter"," "].includes(e.key)){e.preventDefault();selected=node?{type:"site",id:node.dataset.site}:hit?{type:"link",id:hit.dataset.link}:row.dataset.vlan?{type:"vlan",id:row.dataset.vlan}:{type:"site",id:row.dataset.site};render();return}
+  if((node||row||hit)&&!e.target.closest?.("button,a,input,select,textarea")&&["Enter"," "].includes(e.key)){e.preventDefault();const entity=node?{type:"site",id:node.dataset.site}:hit?{type:"link",id:hit.dataset.link}:row.dataset.vlan?{type:"vlan",id:row.dataset.vlan}:{type:"site",id:row.dataset.site};select(entity);return}
   const tab=e.target.closest?.('[role="tab"]');if(tab&&["ArrowRight","ArrowDown","ArrowLeft","ArrowUp","Home","End"].includes(e.key)){e.preventDefault();const tabs=$$('[role="tab"]'),index=tabs.indexOf(tab),next=e.key==="Home"?0:e.key==="End"?tabs.length-1:e.key.includes("Right")||e.key.includes("Down")?(index+1)%tabs.length:(index-1+tabs.length)%tabs.length;activateView(tabs[next].dataset.view,true)}
 });
 $("#recommend-form").addEventListener("submit",e=>e.preventDefault());
@@ -699,7 +764,7 @@ $("#canvas").addEventListener("pointermove",e=>{
   }
   if(panDrag){canvasPan={x:panDrag.x+e.clientX-panDrag.startX,y:panDrag.y+e.clientY-panDrag.startY};applyCanvasZoom();return}
   if(!drag)return;const canvas=$("#canvas"),dx=(e.clientX-drag.startX)/canvasZoom,dy=(e.clientY-drag.startY)/canvasZoom;if(Math.abs(dx)+Math.abs(dy)>3)drag.moved=true;
-  drag.site.x=Math.max(0,Math.min(82,drag.x+dx/canvas.clientWidth*100));drag.site.y=Math.max(0,Math.min(84,drag.y+dy/canvas.clientHeight*100));renderCanvas();
+  drag.site.x=Math.max(0,Math.min(82,drag.x+dx/canvas.clientWidth*100));drag.site.y=Math.max(0,Math.min(84,drag.y+dy/canvas.clientHeight*100));moveNode(drag.site);
 });
 function releasePointer(e,commit){
   const wasPinch=pinch;
@@ -720,7 +785,7 @@ function releasePointer(e,commit){
   else{
     // A cancelled gesture never happened: put the node back where the drag
     // found it before dropping the history snapshot.
-    if(!commit){drag.site.x=drag.x;drag.site.y=drag.y;if(drag.moved)renderCanvas()}
+    if(!commit){drag.site.x=drag.x;drag.site.y=drag.y;if(drag.moved)moveNode(drag.site)}
     undoStack.pop();updateHistoryButtons();if(commit){selected={type:"site",id:drag.site.id};render()}
   }
   drag=null;
