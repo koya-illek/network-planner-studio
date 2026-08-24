@@ -1,8 +1,8 @@
 # Network Planner Studio architecture
 
-Last reviewed: 2026-08-23
+Last reviewed: 2026-08-23 (round 2)
 
-Network Planner Studio is a local-first IPv4 design workbench. Cloudflare serves the application, while network designs, calculations, history, and exports remain in the user's browser unless the user deliberately downloads or imports a file.
+Network Planner Studio is a local-first IPv4 design workbench. Cloudflare serves the application, while network designs, calculations, history, and exports remain in the user's browser unless the user deliberately downloads or imports a file. A stateless machine surface (`/api/v1`, `/mcp`) exposes the same planning engine to scripts and AI agents; submitted documents are computed and discarded, never stored.
 
 ![Network Planner Studio architecture infographic](docs/assets/network-planner-architecture.png)
 
@@ -34,26 +34,36 @@ flowchart LR
     Storage[(Browser localStorage)]
     Export[JSON, CSV, and print report]
     User[Network planner or MSP engineer]
+    Agent[Scripts and AI agents via REST/MCP]
 
     User --> Edge --> Browser
     Browser --> UI --> Core
     Core --> UI
     Browser <--> Storage
     Browser --> Export --> User
+    Agent --> Edge
+    Edge --> Core
 ```
 
-No project-data arrow returns to Cloudflare because normal designs are processed and stored locally.
+No project-data arrow returns to Cloudflare from normal browser use because designs are processed and stored locally. Agents that call the machine surface deliberately submit a document for computation, mirroring the export/import boundary; nothing they send is persisted.
 
 ## Runtime components
 
 | Component | Responsibility | Primary source |
 | --- | --- | --- |
-| Cloudflare Worker | Serves static assets with security and cross-origin isolation headers, canonical-host redirects, a branded 404 page, and a small health endpoint | `worker.js` |
+| Cloudflare Worker | Serves static assets with security and cross-origin isolation headers, canonical-host redirects, a branded 404 page, a small health endpoint, and the machine surfaces | `worker.js` |
+| Shared hardening | Single source of the response security set plus machine-response additions (no-store, noindex, CORS) | `headers.js` |
+| REST planning API | Versioned stateless endpoints: validate, review, route, subnet allocation, OpenAPI description | `api.js` |
+| MCP tool server | Streamable-HTTP (stateless JSON mode) tools mirroring the REST operations for AI agents | `mcp.js` |
 | Browser shell | Manages project workflows, forms, topology interaction, persistence, import, export, report rendering, and accessibility state | `public/app.js` |
-| Network core | Owns schema v3, normalization, validation, IPv4 and CIDR math, allocation, topology, routing, trace, migration, CSV, and report data | `public/network-core.js` |
+| Network core | Owns schema v3, normalization, validation, IPv4 and CIDR math, allocation, topology, routing, trace, migration, CSV, review heuristics, and report data | `public/network-core.js` |
 | Static UI | Defines the application structure and styling | `public/index.html`, `public/styles.css` |
 | Local project store | Persists serialized versioned projects in browser storage | Browser `localStorage` |
 | Export boundary | Produces JSON, CSV, and print-ready HTML for user-controlled download or PDF printing | Browser application |
+
+The browser UI and both machine surfaces call the same core functions, so a
+design reviews identically whether it is inspected in the workspace or through
+`/api/v1/review`.
 
 ## Canonical data model
 
@@ -95,19 +105,19 @@ Every entry path uses shared factories and validators. Manual forms, recommendat
 
 | Service or platform | Use | Project data sent | Required |
 | --- | --- | --- | --- |
-| Cloudflare Workers | Serves the application, redirects aliases, exposes `/api/health`, and provides server-side request observability | No project payload is submitted by normal use | Yes for hosted use |
+| Cloudflare Workers | Serves the application, redirects aliases, exposes `/api/health`, computes stateless planning requests for `/api/v1` and `/mcp`, and provides server-side request observability | No project payload is submitted by normal browser use; machine-surface callers deliberately submit designs that are never stored | Yes for hosted use |
 | Cloudflare Workers Assets | Serves HTML, CSS, JavaScript, icons, robots, and sitemap | No project data | Yes for hosted use |
 | Browser `localStorage` | Stores projects on the user's device. The current design and a 20-project library (most recently updated, current project always kept) are written through debounced saves; undo history is capped at 40 in-memory snapshots | Data stays in that browser profile | Optional persistence |
 | Browser print and download APIs | Produces user-controlled files and PDF handoff | Data leaves only through user-directed export | Optional |
 
-There is no runtime database, analytics service, authentication provider, remote planner API, MCP server, cloud project sync, live network discovery, vendor controller, or RMM integration.
+There is no runtime database, analytics service, authentication provider, cloud project sync, live network discovery, vendor controller, or RMM integration. The stateless machine surfaces (`/api/v1`, `/mcp`) are described above.
 
 ## Privacy and trust boundary
 
 - Designs are private and local by default.
 - Cloudflare receives normal web request metadata for application assets and health checks.
 - Site names, IP ranges, policies, assumptions, and implementation notes are not sent to an application backend during normal planning.
-- Imports are untrusted input and are schema-validated before use. JSON and CSV imports above 10 MB are rejected before parsing.
+- Imports are untrusted input and are schema-validated before use. JSON and CSV imports above 10 MB are rejected before parsing. Machine-surface bodies are JSON-only, capped at 1 MiB, and parsed through the same canonical migration as imports.
 - Dynamic values are escaped or enum-constrained before rendering.
 - Storage failure is reported to the user rather than silently discarding changes. An unreadable stored blob is quarantined under a `.unreadable` key before any later save can overwrite it.
 - The pending debounced save flushes on `pagehide` and when the tab is backgrounded, so mobile cannot park unsaved edits indefinitely.
@@ -123,11 +133,17 @@ The product is intentionally browser-first.
 | --- | --- |
 | `/` | Complete planning application |
 | `GET`, `HEAD`, or `OPTIONS /api/health` | Service, schema, and release liveness |
+| `/api/v1/*` | Versioned stateless REST computations (validate, review, route, allocation) with an OpenAPI description — see [docs/api.md](docs/api.md) |
+| `/mcp` | MCP tool server exposing the same operations to AI agents |
 | JSON import and export | Lossless versioned design exchange |
 | CSV import and export | Address-plan and topology exchange |
 | Print report | Human implementation handoff and PDF generation |
 
-There is no public project-processing REST API or MCP interface. Adding one would change the local-first privacy boundary and requires a separate product decision.
+The machine surfaces are stateless compute: a caller deliberately submits a
+design document, the worker computes over it through the canonical core, and
+the document is discarded with the response. There is no storage binding, no
+account system and no project sync; the local-first boundary for normal
+planning is unchanged.
 
 ## Deployment topology
 
@@ -157,7 +173,8 @@ The current product does not support IPv6, VRF, live discovery, controller login
 ## Verification map
 
 - Core schema and network tests: `npm test`
+- REST and MCP surface tests: `test/api.test.js`, `test/mcp.test.js`, `tests/api.spec.js`
 - Browser workflow and accessibility tests: `npm run test:e2e`
-- Worker and static source: `worker.js`, `public/`
+- Worker, machine surfaces and static source: `worker.js`, `api.js`, `mcp.js`, `headers.js`, `public/`
 - Canonical model and calculations: `public/network-core.js`
 - Browser orchestration: `public/app.js`

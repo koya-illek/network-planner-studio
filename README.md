@@ -37,6 +37,7 @@ data flow, privacy boundary, deployment topology, and external dependencies.
 - Multiple local projects with duplicate, open and delete workflows
 - Print-ready implementation report for PDF handoff
 - Versioned JSON migration plus RFC 4180 CSV address-plan import/export
+- Versioned REST planning API (`/api/v1`, OpenAPI-described) and an MCP tool server at `/mcp` for AI agents — see [docs/api.md](docs/api.md)
 - Zoom, pan, pinch, fit-to-screen, undoable keyboard nudges, drag-cancel snap-back and a mobile site drawer
 - Responsive desktop and mobile layouts
 
@@ -54,7 +55,9 @@ npm test
 npm run test:e2e
 ```
 
-The health endpoint is available at `/api/health`.
+The health endpoint is available at `/api/health`. The planner engine is also
+served as a versioned REST API and an MCP tool server; see
+[docs/api.md](docs/api.md).
 
 Before a release, run the complete local gate:
 
