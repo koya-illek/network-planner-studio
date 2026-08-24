@@ -56,7 +56,7 @@ test("the service directory describes every endpoint with release provenance", a
   assert.equal(body.version, packageMetadata.version);
   assert.equal(body.schema, SCHEMA_ID);
   assert.equal(body.schemaVersion, SCHEMA_VERSION);
-  assert.equal(body.endpoints.length, 6);
+  assert.equal(body.endpoints.length, 7);
 });
 
 test("machine responses carry the hardening set, no-store caching and noindex", async () => {
@@ -222,4 +222,38 @@ test("subnet allocation endpoints expose the engine math with honest failures", 
   response = await postJson("/api/v1/site-range/suggest", { occupied: ["10.20.0.0/16"], devices: "many" });
   assert.equal(response.status, 400);
   assert.equal((await response.json()).error.code, "invalid_input");
+});
+
+test("the standalone design schema is a draft 2020-12 artifact mirroring the OpenAPI component", async () => {
+  const response = await fetchApi("/api/v1/design-schema.json");
+  assert.equal(response.status, 200);
+  assert.ok(response.headers.get("Content-Type").startsWith("application/schema+json"), "schema artifacts use the schema+json media type");
+  const schema = await response.json();
+  assert.equal(schema.$schema, "https://json-schema.org/draft/2020-12/schema");
+  assert.equal(schema.$id, "https://network.illek.ie/api/v1/design-schema.json");
+  assert.equal(schema.type, "object");
+  for (const key of ["schema", "version", "sites", "links"]) assert.ok(schema.required.includes(key));
+  assert.equal(schema.properties.schema.const, SCHEMA_ID);
+  assert.ok(Array.isArray(schema.properties.sites.items.properties.vlans.items.properties.role.enum));
+  // One source of truth: the OpenAPI component must be the same object.
+  const openapi = await (await fetchApi("/api/v1/openapi.json")).json();
+  const { $schema: _s, $id: _i, title: _t, ...component } = schema;
+  assert.deepEqual(openapi.components.schemas.DesignDocument, component);
+  assert.ok(openapi.paths["/api/v1/design-schema.json"], "OpenAPI must describe the schema endpoint");
+});
+
+test("the design schema endpoint answers HEAD and refuses writes", async () => {
+  const head = await fetchApi("/api/v1/design-schema.json", { method: "HEAD" });
+  assert.equal(head.status, 200);
+  assert.equal(await head.text(), "");
+  const post = await fetchApi("/api/v1/design-schema.json", { method: "POST" });
+  assert.equal(post.status, 405);
+  assert.equal(post.headers.get("Allow"), "GET, HEAD, OPTIONS");
+});
+
+test("the directory points at the MCP surface and the schema artifact", async () => {
+  const directory = await (await fetchApi("/api/v1")).json();
+  assert.equal(directory.mcp, "/mcp");
+  assert.equal(directory.designSchema, "/api/v1/design-schema.json");
+  assert.ok(directory.endpoints.some(entry => entry.path === "/api/v1/design-schema.json"));
 });

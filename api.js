@@ -22,10 +22,10 @@ export class HttpProblem extends Error {
 
 const baseHeaders = () => machineResponseHeaders();
 
-function jsonResponse(payload, { status = 200, headers = new Headers() } = {}) {
+function jsonResponse(payload, { status = 200, headers = new Headers(), contentType = "application/json; charset=utf-8" } = {}) {
   const finalHeaders = baseHeaders();
   for (const [key, value] of headers) finalHeaders.set(key, value);
-  finalHeaders.set("Content-Type", "application/json; charset=utf-8");
+  finalHeaders.set("Content-Type", contentType);
   return new Response(JSON.stringify(payload), { status, headers: finalHeaders });
 }
 
@@ -170,15 +170,91 @@ function directory() {
     version: packageMetadata.version,
     schema: SCHEMA_ID,
     schemaVersion: SCHEMA_VERSION,
+    mcp: "/mcp",
+    designSchema: "/api/v1/design-schema.json",
     description: "Stateless IPv4 planning computations over the network-planner-studio canonical model. No accounts, no storage.",
     endpoints: [
       { method: "GET", path: "/api/v1/openapi.json", description: "OpenAPI 3.1 description of this API." },
+      { method: "GET", path: "/api/v1/design-schema.json", description: "Standalone JSON Schema (draft 2020-12) of the canonical design document." },
       { method: "POST", path: "/api/v1/validate", description: "Canonicalize a design against schema v3 and report hard validation errors, warnings and normalization corrections." },
       { method: "POST", path: "/api/v1/review", description: "Run the workspace design review: weighted score plus heuristic findings (overlaps, capacity, hub-and-spoke consistency)." },
       { method: "POST", path: "/api/v1/route", description: "Trace the shortest permitted inter-site path under a design's topology policy." },
       { method: "POST", path: "/api/v1/subnets/next", description: "Allocate the next aligned free subnet inside a parent range." },
       { method: "POST", path: "/api/v1/site-range/suggest", description: "Suggest a non-overlapping RFC1918 site block for a planned device count." }
     ]
+  };
+}
+
+/** Structural schema of the canonical design document. Single source for the
+ * OpenAPI component and the standalone JSON Schema artifact, so machine
+ * validation can never drift from what the endpoints actually accept. */
+const DESIGN_DOCUMENT_SCHEMA = {
+  type: "object",
+  description: `A ${SCHEMA_ID} v${SCHEMA_VERSION} design document.`,
+  required: ["schema", "version", "sites", "links"],
+  properties: {
+    schema: { type: "string", const: SCHEMA_ID },
+    version: { type: "integer", const: SCHEMA_VERSION },
+    projectId: { type: "string" },
+    name: { type: "string" },
+    topologyMode: { type: "string", enum: ["custom", "hub-spoke", "mesh"] },
+    policies: { type: "object", properties: { spokeToSpoke: { type: "string", enum: ["via-hub", "denied"] }, centralizedInspection: { type: "boolean" }, secondaryHubId: { type: ["string", "null"] } } },
+    flowPolicies: { type: "object", additionalProperties: { type: "string", enum: ["allow", "restricted", "deny"] } },
+    assumptions: { type: "array", items: { type: "string" } },
+    sites: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["id", "cidr"],
+        properties: {
+          id: { type: "string" }, name: { type: "string" },
+          type: { type: "string", enum: ["office", "branch", "datacentre", "cloud", "warehouse"] },
+          cidr: { type: "string", description: "Aligned IPv4 allocation CIDR /8 to /30." },
+          wan: { type: "string", enum: ["single", "dual", "none"] },
+          topologyRole: { type: "string", enum: ["standalone", "hub", "spoke"] },
+          hubId: { type: ["string", "null"] },
+          internetBreakout: { type: "string", enum: ["local", "hub", "none"] },
+          vlans: {
+            type: "array",
+            items: {
+              type: "object",
+              required: ["id", "cidr"],
+              properties: {
+                id: { type: "string" }, name: { type: "string" }, vid: { type: "integer", minimum: 1, maximum: 4094 },
+                role: { type: "string", enum: ["users", "voice", "guest", "iot", "servers", "management", "transit", "other"] },
+                cidr: { type: "string" }, gateway: { type: "string" }, devices: { type: "integer" },
+                dhcpEnabled: { type: "boolean" }, reserved: { type: "integer" }, dhcpStart: { type: "string" }, dhcpEnd: { type: "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    links: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["id", "from", "to"],
+        properties: {
+          id: { type: "string" }, from: { type: "string" }, to: { type: "string" },
+          type: { type: "string", enum: ["vpn", "private", "peering", "internet"] },
+          resilience: { type: "string", enum: ["single", "dual"] },
+          routingType: { type: "string", enum: ["static", "bgp"] },
+          transitAllowed: { type: "boolean" },
+          defaultRoute: { type: "boolean" },
+          advertisedPrefixes: { type: "array", items: { type: "string" } }
+        }
+      }
+    }
+  }
+};
+
+function designSchema() {
+  return {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    $id: "https://network.illek.ie/api/v1/design-schema.json",
+    title: "Network Planner Studio design document",
+    ...DESIGN_DOCUMENT_SCHEMA
   };
 }
 
@@ -205,6 +281,13 @@ function openapi() {
     paths: {
       "/api/v1": { get: { ...ok("Service directory."), summary: "List API endpoints.", responses: jsonResponseFor({ $ref: "#/components/schemas/Directory" }) } },
       "/api/v1/openapi.json": { get: { summary: "This OpenAPI document.", responses: jsonResponseFor({ type: "object" }) } },
+      "/api/v1/design-schema.json": {
+        get: {
+          summary: "Standalone JSON Schema of the canonical design document",
+          description: `Draft 2020-12 JSON Schema for ${SCHEMA_ID} v${SCHEMA_VERSION}, usable with offline validators; mirrors components.schemas.DesignDocument.`,
+          responses: jsonResponseFor({ type: "object" })
+        }
+      },
       "/api/v1/validate": {
         post: {
           summary: "Validate and canonicalize a design",
@@ -286,67 +369,8 @@ function openapi() {
             endpoints: { type: "array", items: { type: "object", properties: { method: { type: "string" }, path: { type: "string" }, description: { type: "string" } } } }
           }
         },
-        DesignDocument: {
-          type: "object",
-          description: `A ${SCHEMA_ID} v${SCHEMA_VERSION} design document.`,
-          required: ["schema", "version", "sites", "links"],
-          properties: {
-            schema: { type: "string", const: SCHEMA_ID },
-            version: { type: "integer", const: SCHEMA_VERSION },
-            projectId: { type: "string" },
-            name: { type: "string" },
-            topologyMode: { type: "string", enum: ["custom", "hub-spoke", "mesh"] },
-            policies: { type: "object", properties: { spokeToSpoke: { type: "string", enum: ["via-hub", "denied"] }, centralizedInspection: { type: "boolean" }, secondaryHubId: { type: ["string", "null"] } } },
-            flowPolicies: { type: "object", additionalProperties: { type: "string", enum: ["allow", "restricted", "deny"] } },
-            assumptions: { type: "array", items: { type: "string" } },
-            sites: {
-              type: "array",
-              items: {
-                type: "object",
-                required: ["id", "cidr"],
-                properties: {
-                  id: { type: "string" }, name: { type: "string" },
-                  type: { type: "string", enum: ["office", "branch", "datacentre", "cloud", "warehouse"] },
-                  cidr: { type: "string", description: "Aligned IPv4 allocation CIDR /8 to /30." },
-                  wan: { type: "string", enum: ["single", "dual", "none"] },
-                  topologyRole: { type: "string", enum: ["standalone", "hub", "spoke"] },
-                  hubId: { type: ["string", "null"] },
-                  internetBreakout: { type: "string", enum: ["local", "hub", "none"] },
-                  vlans: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      required: ["id", "cidr"],
-                      properties: {
-                        id: { type: "string" }, name: { type: "string" }, vid: { type: "integer", minimum: 1, maximum: 4094 },
-                        role: { type: "string", enum: ["users", "voice", "guest", "iot", "servers", "management", "transit", "other"] },
-                        cidr: { type: "string" }, gateway: { type: "string" }, devices: { type: "integer" },
-                        dhcpEnabled: { type: "boolean" }, reserved: { type: "integer" }, dhcpStart: { type: "string" }, dhcpEnd: { type: "string" }
-                      }
-                    }
-                  }
-                }
-              }
-            },
-            links: {
-              type: "array",
-              items: {
-                type: "object",
-                required: ["id", "from", "to"],
-                properties: {
-                  id: { type: "string" }, from: { type: "string" }, to: { type: "string" },
-                  type: { type: "string", enum: ["vpn", "private", "peering", "internet"] },
-                  resilience: { type: "string", enum: ["single", "dual"] },
-                  routingType: { type: "string", enum: ["static", "bgp"] },
-                  transitAllowed: { type: "boolean" },
-                  defaultRoute: { type: "boolean" },
-                  advertisedPrefixes: { type: "array", items: { type: "string" } }
-                }
-              }
-            }
-          }
-        },
-        ValidationIssue: {
+        DesignDocument: DESIGN_DOCUMENT_SCHEMA,
+                ValidationIssue: {
           type: "object",
           properties: {
             path: { type: "string" },
@@ -413,14 +437,21 @@ export async function handleApiRequest(request) {
   try {
     if (method === "OPTIONS") return preflight();
     const notAllowed = allow => problemResponse(new HttpProblem(405, "method_not_allowed", `${method} is not supported here.`), { Allow: allow });
+    // Directory responses are computed per request; a HEAD must not carry a
+    // phantom body even where the runtime would strip one.
+    const headOr = response => method === "HEAD" ? new Response(null, { status: response.status, headers: response.headers }) : response;
 
     if (url.pathname === "/api/v1" || url.pathname === "/api/v1/") {
       if (!["GET", "HEAD"].includes(method)) return notAllowed("GET, HEAD, OPTIONS");
-      return jsonResponse(directory());
+      return headOr(jsonResponse(directory()));
     }
     if (url.pathname === "/api/v1/openapi.json") {
       if (!["GET", "HEAD"].includes(method)) return notAllowed("GET, HEAD, OPTIONS");
-      return jsonResponse(openapi());
+      return headOr(jsonResponse(openapi()));
+    }
+    if (url.pathname === "/api/v1/design-schema.json") {
+      if (!["GET", "HEAD"].includes(method)) return notAllowed("GET, HEAD, OPTIONS");
+      return headOr(jsonResponse(designSchema(), { contentType: "application/schema+json; charset=utf-8" }));
     }
 
     const postedRoutes = {
