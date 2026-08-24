@@ -9,8 +9,8 @@ const fetchMcp = (body, init = {}) => worker.fetch(new Request("http://127.0.0.1
   body: typeof body === "string" ? body : JSON.stringify(body)
 }), {});
 
-const rpc = async payload => {
-  const response = await fetchMcp(payload);
+const rpc = async (payload, init) => {
+  const response = await fetchMcp(payload, init);
   return { response, body: response.status === 202 ? null : await response.json() };
 };
 
@@ -194,4 +194,32 @@ test("machine responses carry the shared hardening set", async () => {
     assert.ok(response.headers.get(header));
   }
   assert.equal(response.headers.get("Cache-Control"), "no-store");
+});
+
+test("every tool declares read-only, idempotent, closed-world annotations", async () => {
+  const { body } = await rpc({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+  assert.ok(body.result.tools.length >= 5);
+  for (const entry of body.result.tools) {
+    assert.equal(entry.annotations.readOnlyHint, true, `${entry.name} computes without side effects`);
+    assert.equal(entry.annotations.idempotentHint, true, `${entry.name} is deterministic per arguments`);
+    assert.equal(entry.annotations.openWorldHint, false, `${entry.name} never touches an external system`);
+  }
+});
+
+test("initialize declares a stable tool list", async () => {
+  const { body } = await rpc({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } });
+  assert.equal(body.result.capabilities.tools.listChanged, false);
+});
+
+test("a pinned unsupported protocol version is refused with 400", async () => {
+  const { response, body } = await rpc({ jsonrpc: "2.0", id: 1, method: "ping" }, { headers: { "MCP-Protocol-Version": "2024-11-05" } });
+  assert.equal(response.status, 400);
+  assert.equal(body.error.code, -32600);
+  assert.match(body.error.message, /2024-11-05/);
+  assert.match(body.error.message, /2025-06-18/);
+});
+
+test("a supported pinned protocol version passes through untouched", async () => {
+  const { response } = await rpc({ jsonrpc: "2.0", id: 1, method: "tools/list" }, { headers: { "MCP-Protocol-Version": "2025-03-26" } });
+  assert.equal(response.status, 200);
 });

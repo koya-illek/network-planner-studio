@@ -31,7 +31,12 @@ function notificationAccepted() {
   return new Response(null, { status: 202, headers: machineResponseHeaders() });
 }
 
-const tool = (name, title, description, inputSchema, outputSchema) => ({ name, title, description, inputSchema, outputSchema });
+// Every tool is a pure computation over the submitted design: no writes, no
+// world effects, deterministic for identical arguments. The annotations say
+// so in the vocabulary agents use to reason about tool safety.
+const TOOL_ANNOTATIONS = Object.freeze({ readOnlyHint: true, idempotentHint: true, openWorldHint: false });
+
+const tool = (name, title, description, inputSchema, outputSchema) => ({ name, title, description, inputSchema, outputSchema, annotations: { ...TOOL_ANNOTATIONS } });
 
 // Structured results mirror the REST payloads exactly; declaring their shape
 // lets agents validate tool answers instead of string-parsing them.
@@ -189,6 +194,19 @@ export async function handleMcpRequest(request) {
       return new Response(null, { status: 405, headers });
     }
 
+    // Post-negotiation requests declare the version they settled on. A client
+    // pinning a version this server cannot speak gets an honest 400 instead
+    // of silently answering in a dialect it never agreed to.
+    const declaredVersion = request.headers.get("MCP-Protocol-Version");
+    if (declaredVersion && !SUPPORTED_PROTOCOL_VERSIONS.includes(declaredVersion)) {
+      const headers = machineResponseHeaders();
+      headers.set("Content-Type", "application/json; charset=utf-8");
+      return new Response(JSON.stringify({
+        jsonrpc: "2.0", id: null,
+        error: { code: -32600, message: `Unsupported MCP-Protocol-Version "${declaredVersion}". Supported versions: ${SUPPORTED_PROTOCOL_VERSIONS.join(", ")}.` }
+      }), { status: 400, headers });
+    }
+
     let message;
     try {
       message = await readJsonBody(request);
@@ -221,7 +239,7 @@ export async function handleMcpRequest(request) {
       case "initialize":
         return rpcResult(id, {
           protocolVersion: negotiated,
-          capabilities: { tools: {} },
+          capabilities: { tools: { listChanged: false } },
           serverInfo: { name: packageMetadata.name, title: "Network Planner Studio", version: packageMetadata.version },
           instructions: "Stateless IPv4 planning tools over the network-planner-studio/design v3 model. Use validate_design after building a design and review_design for heuristic findings; next_subnet and suggest_site_range allocate addresses; find_route traces inter-site paths under topology policy."
         }, negotiated);
