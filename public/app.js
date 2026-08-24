@@ -377,17 +377,31 @@ function renderInspector(){
 function connectionsFor(id){return state.links.filter(l=>l.from===id||l.to===id).length}
 function roleAdvice(role){return{users:"Keep user endpoints separate from infrastructure and restrict east-west access where practical.",voice:"Reserve predictable capacity and apply the voice QoS policy consistently across the WAN.",guest:"Use internet-only access and prevent routes to private corporate address space.",iot:"Treat unmanaged devices as untrusted and allow only required destinations and ports.",servers:"Separate workloads by trust level where the environment warrants it.",management:"Restrict access to administrators and avoid general user traffic on this network.",transit:"Use a dedicated, tightly sized subnet for routed point-to-point connectivity.",other:"Document the trust level, allowed flows and ownership of this segment."}[role]}
 
+// The address plan renders whole at imported scale; a filter keeps
+// thousands of rows findable without leaving the table.
+let addressFilter="";
+function addressRowMatches(site,v,query){
+  return site.name.toLowerCase().includes(query)||site.cidr.toLowerCase().includes(query)
+    ||v.name.toLowerCase().includes(query)||String(v.vid)===query||v.cidr.toLowerCase().includes(query);
+}
 function renderAddressPlan(){
   const all=state.sites.flatMap(s=>s.vlans.map(v=>({site:s,vlan:v,p:safeParse(v.cidr)})));
   const usable=all.reduce((n,x)=>n+safeCapacity(x.vlan),0),needed=all.reduce((n,x)=>n+x.vlan.devices,0);
   $("#address-summary").innerHTML=[
     ["Sites",state.sites.length],["VLANs",all.length],["Usable addresses",usable.toLocaleString()],["Planned devices",needed.toLocaleString()]
   ].map(([a,b])=>`<div class="summary-card"><span>${a}</span><strong>${b}</strong></div>`).join("");
-  $("#address-table").innerHTML=all.length?all.map(({site,vlan:v,p})=>{
+  const query=addressFilter.trim().toLowerCase(),shown=query?all.filter(({site,vlan:v})=>addressRowMatches(site,v,query)):all;
+  $("#address-filter-count").textContent=query?`${shown.length} of ${all.length} rows match`:"";
+  $("#address-table").innerHTML=shown.length?shown.map(({site,vlan:v,p})=>{
     const capacity=safeCapacity(v),head=p?Math.max(0,Math.round((1-v.devices/capacity)*100)):0,status=!p?["Invalid","error"]:v.devices>capacity?["Over capacity","error"]:head<20?["Low headroom","warning"]:["Healthy",""];
     return `<tr><td><strong>${escapeHtml(site.name)}</strong><br><small>${escapeHtml(v.name)}</small></td><td>${v.vid}</td><td><code>${escapeHtml(v.cidr)}</code></td><td><code>${escapeHtml(v.gateway)}</code></td><td>${v.devices}</td><td>${p?capacity:"Unavailable"}</td><td>${p?head+"%":"Unavailable"}</td><td><span class="status-pill ${status[1]}">${status[0]}</span></td></tr>`
-  }).join(""):`<tr><td colspan="8">No VLANs have been added yet.</td></tr>`;
+  }).join(""):`<tr><td colspan="8">${query?`No rows match “${escapeHtml(addressFilter.trim())}”.`:"No VLANs have been added yet."}</td></tr>`;
 }
+$("#address-filter").addEventListener("input",e=>{addressFilter=e.target.value;renderAddressPlan()});
+$("#address-filter").addEventListener("keydown",e=>{
+  if(e.key!=="Escape"||!e.target.value)return;
+  e.stopPropagation();e.target.value="";addressFilter="";renderAddressPlan();
+});
 
 let reviewCache=null;
 // The heuristics live in the core model so the API and MCP surfaces report

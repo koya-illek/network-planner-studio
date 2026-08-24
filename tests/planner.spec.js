@@ -729,3 +729,30 @@ test("zoom buttons honour the widened range and update the readout", async ({ pa
   await page.locator("#zoom-fit").click();
   await expect(page.locator("#zoom-level")).toHaveText("100%");
 });
+
+test("the address plan filter narrows rows and Escape resets it", async ({ page }) => {
+  await page.locator('[data-view="addressing"]').click();
+  const total = await page.locator("#address-table tr").count();
+  expect(total).toBeGreaterThan(1);
+  await page.locator("#address-filter").fill("Voice");
+  await expect(page.locator("#address-filter-count")).toHaveText("2 of 9 rows match");
+  expect(await page.locator("#address-table tr")).toHaveCount(2);
+  await page.locator("#address-filter").press("Escape");
+  await expect(page.locator("#address-filter")).toHaveValue("");
+  await expect(page.locator("#address-table tr")).toHaveCount(total);
+  // A nonsense query shows the honest empty state, not stale rows.
+  await page.locator("#address-filter").fill("zzzz");
+  await expect(page.locator("#address-table")).toContainText("No rows match");
+  await page.locator("#address-filter").press("Escape");
+});
+
+test("the CSV export stays complete while the table is filtered", async ({ page }) => {
+  await page.locator('[data-view="addressing"]').click();
+  await page.locator("#address-filter").fill("Voice");
+  await expect(page.locator("#address-table tr")).toHaveCount(2);
+  const downloadPromise = page.waitForEvent("download");
+  await page.locator("#csv-export").click();
+  const download = await downloadPromise;
+  const csv = await (await import("node:fs/promises")).readFile(await download.path(), "utf8");
+  expect(csv.match(/"vlan"/g).length).toBe(9);
+});

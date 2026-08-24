@@ -31,6 +31,7 @@ button{color:inherit}
 .tool-panel,.inspector{background:var(--cream);overflow:auto}.tool-panel{border-right:1px solid var(--line);padding:18px 14px}.inspector{border-left:1px solid var(--line)}
 .panel-heading{display:flex;justify-content:space-between;align-items:center;padding:4px 5px 14px}.panel-heading h2{font-size:16px;margin:4px 0}.icon-button{border:1px solid var(--line);background:var(--cream);border-radius:9px;width:34px;height:34px;cursor:pointer;font-size:20px}
 .site-filter-row{padding:0 5px 8px}#site-filter{margin-top:0;padding:9px 11px;font-size:12px}
+.address-filter-row{display:flex;gap:14px;align-items:center;margin-bottom:14px}.address-filter-row input{max-width:340px;margin-top:0;padding:9px 11px;font-size:12px}#address-filter-count{font-size:10px;color:var(--muted)}
 .site-filter-count{min-height:14px;margin:-2px 5px 6px;font-size:10px;color:var(--muted)}
 .site-list-empty{padding:14px 10px;color:var(--muted);font-size:11px;text-align:center}
 .site-list{display:flex;flex-direction:column;gap:7px}
