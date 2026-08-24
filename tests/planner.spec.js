@@ -587,3 +587,28 @@ test("escape clears the inspector selection", async ({ page }) => {
   await expect(page.locator("#inspector")).toContainText("Select something");
   await expect.poll(() => page.evaluate(() => document.activeElement.id)).toBe("inspector");
 });
+
+test("undo and redo answer their keyboard shortcuts", async ({ page }) => {
+  const devices = () => page.evaluate(() => JSON.parse(localStorage.getItem("network-planner-studio.v1")).sites[0].vlans[0].devices);
+  await page.locator(".vlan-row").first().click();
+  await page.locator("[data-edit-vlan]").click();
+  await page.locator("#vlan-form input[name=devices]").fill("111");
+  await page.locator("#vlan-form button[type=submit]").click();
+  await expect.poll(devices).toBe(111);
+
+  // The shortcut must reach the editor from a non-typing context…
+  await page.locator(".canvas-toolbar button[data-tool=select]").focus();
+  await page.keyboard.press("Control+z");
+  await expect.poll(devices).toBe(100);
+  await page.keyboard.press("Control+Shift+Z");
+  await expect.poll(devices).toBe(111);
+
+  // …and stay out of the way of native text undo while a dialog is open.
+  await page.locator("#project-name-button").click();
+  await page.keyboard.press("Control+z");
+  await expect.poll(devices).toBe(111);
+  await page.locator("#name-dialog [data-close-dialog]").first().click();
+  await page.locator(".canvas-toolbar button[data-tool=select]").focus();
+  await page.keyboard.press("Control+z");
+  await expect.poll(devices).toBe(100);
+});

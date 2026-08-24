@@ -98,6 +98,21 @@ test("round-3 safeguards stay wired: native keyboard activation, tolerant reviva
   assert.match(html, /property="og:site_name"/);
 });
 
+test("round-2 keyboard shortcuts and machine surfaces are wired", async () => {
+  const app = await readFile(new URL("public/app.js", root), "utf8");
+  const html = await readFile(new URL("public/index.html", root), "utf8");
+  const worker = await readFile(new URL("worker.js", root), "utf8");
+  // Editor shortcuts must yield to native text undo while typing or in a dialog.
+  assert.match(app, /\["z","y"\]\.includes\(e\.key\.toLowerCase\(\)\)/);
+  assert.match(app, /if\(typing\|\|\$\("dialog\[open\]"\)\)return/);
+  assert.match(html, /aria-keyshortcuts="Control\+Z Meta\+Z"/);
+  assert.match(html, /aria-keyshortcuts="Control\+Shift\+Z Control\+Y Meta\+Shift\+Z Meta\+Y"/);
+  assert.match(app, /behavior:prefersReducedMotion\.matches\?"auto":"smooth"/, "home scrolling must honour reduced motion");
+  // Machine surface routing lives on the worker.
+  assert.match(worker, /handleMcpRequest/);
+  assert.match(worker, /handleApiRequest/);
+});
+
 test("iteration-4 keeps keyboard focus across selection, policy and resize re-renders", async () => {
   const app = await readFile(new URL("public/app.js", root), "utf8");
   assert.match(app, /function focusKeeper\(\)/, "render passes must capture focused element identity");

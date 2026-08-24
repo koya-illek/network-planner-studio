@@ -137,7 +137,7 @@ function showHome(){
   $("#workspace").classList.add("hidden");
   $("#welcome").classList.remove("hidden");
   $("#continue-design").classList.toggle("hidden",!state.sites.length);
-  window.scrollTo({top:0,behavior:"smooth"});
+  window.scrollTo({top:0,behavior:prefersReducedMotion.matches?"auto":"smooth"});
 }
 
 const FOCUS_IDENTITY=[["vlan-row","data-vlan"],["site-row-select","data-site"],["topology-node","data-site"],["link-hit","data-link"],["add-vlan-mini","data-add-vlan"]];
@@ -577,6 +577,15 @@ document.addEventListener("keydown",e=>{
     if(menu?.open){menu.open=false;menu.querySelector("summary").focus();return}
     // Escape is the keyboard counterpart of the inspector close button.
     if(!$("dialog[open]")&&selected){selected=null;render();$("#inspector").focus()}
+  }
+  // Undo and redo belong to the editor, not to text fields: while typing or
+  // inside a dialog the native input undo must keep working.
+  if((e.ctrlKey||e.metaKey)&&!e.altKey&&["z","y"].includes(e.key.toLowerCase())){
+    const typing=e.target.closest?.("input,textarea,select")||e.target.isContentEditable;
+    if(typing||$("dialog[open]"))return;
+    const redo=e.key.toLowerCase()==="y"||(e.key.toLowerCase()==="z"&&e.shiftKey);
+    e.preventDefault();
+    return restoreHistory(redo?redoStack:undoStack,redo?undoStack:redoStack);
   }
   const node=e.target.closest?.(".topology-node"),row=e.target.closest?.(".site-row,.vlan-row"),hit=e.target.closest?.(".link-hit");
   if(node&&e.target===node&&["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(e.key)){
