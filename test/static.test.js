@@ -29,13 +29,20 @@ test("existing sites, VLANs and path tracing are present", async () => {
 test("worker exposes health and hardened assets", async () => {
   const worker = await readFile(new URL("worker.js", root), "utf8");
   const headers = await readFile(new URL("public/_headers", root), "utf8");
+  const securityModule = await readFile(new URL("headers.js", root), "utf8");
   assert.match(worker, /\/api\/health/);
-  assert.match(worker, /Content-Security-Policy/);
-  assert.doesNotMatch(worker, /cloudflareinsights\.com/, "the local-only application must not allow unused third-party script or connection origins");
+  // The hardening set has one source (headers.js); the worker applies it to
+  // every response it produces.
+  assert.match(worker, /import \{ SECURITY_HEADERS \} from "\.\/headers\.js"/);
+  assert.match(worker, /for \(const \[key, value\] of Object\.entries\(SECURITY_HEADERS\)\)/);
+  assert.match(securityModule, /Content-Security-Policy/);
+  assert.ok(securityModule.includes("script-src 'self'"));
+  assert.doesNotMatch(securityModule, /cloudflareinsights\.com/, "the local-only application must not allow unused third-party script or connection origins");
+  assert.doesNotMatch(worker, /cloudflareinsights\.com/);
   assert.ok(headers.includes("Content-Security-Policy"));
   assert.doesNotMatch(headers, /cloudflareinsights\.com/, "static headers must mirror the self-only runtime policy");
   const hsts="max-age=31536000; includeSubDomains; preload";
-  assert.ok(worker.includes(hsts));
+  assert.ok(securityModule.includes(hsts));
   assert.ok(headers.includes(hsts));
   assert.match(worker, /env\.ASSETS\.fetch/);
   assert.match(worker, /X-Robots-Tag/);
@@ -101,8 +108,10 @@ test("iteration-4 keeps keyboard focus across selection, policy and resize re-re
 test("iteration-4 sets cross-origin isolation headers", async () => {
   const worker = await readFile(new URL("worker.js", root), "utf8");
   const headers = await readFile(new URL("public/_headers", root), "utf8");
+  const securityModule = await readFile(new URL("headers.js", root), "utf8");
   for (const header of ["Cross-Origin-Opener-Policy", "Cross-Origin-Resource-Policy"]) {
-    assert.ok(worker.includes(`"${header}": "same-origin"`), `${header} must be set by the worker`);
+    assert.ok(securityModule.includes(`"${header}": "same-origin"`), `${header} must be declared in the shared security module`);
+    assert.ok(worker.includes('from "./headers.js"'), "the worker must apply the shared security module");
     assert.ok(headers.includes(header), `${header} must be mirrored in _headers`);
   }
 });

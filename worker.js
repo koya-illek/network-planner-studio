@@ -1,15 +1,8 @@
 import packageMetadata from "./package.json" with { type: "json" };
+import { SECURITY_HEADERS } from "./headers.js";
+import { handleApiRequest } from "./api.js";
 
-const SECURITY_HEADERS = {
-  "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
-  "Cross-Origin-Opener-Policy": "same-origin",
-  "Cross-Origin-Resource-Policy": "same-origin",
-  "Referrer-Policy": "strict-origin-when-cross-origin",
-  "X-Content-Type-Options": "nosniff",
-  "X-Frame-Options": "DENY",
-  "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
-  "Strict-Transport-Security": "max-age=31536000; includeSubDomains; preload"
-};
+export { SECURITY_HEADERS };
 
 export default {
   async fetch(request, env) {
@@ -18,6 +11,11 @@ export default {
     // Canonical host redirect: legacy/staging hostnames 301 to network.illek.ie.
     const redirect = redirectForRequest(request);
     if (redirect) return redirect;
+
+    // Machine surface: versioned REST planning API. Stateless compute over
+    // the canonical core model.
+    if (url.pathname === "/api/v1" || url.pathname.startsWith("/api/v1/")) return handleApiRequest(request);
+
     if (url.pathname === "/api/health") {
       const headers = new Headers(SECURITY_HEADERS);
       headers.set("X-Robots-Tag", "noindex, nofollow");
