@@ -219,8 +219,10 @@ test("iteration-8 defers workspace renders behind open modals", async () => {
 });
 
 test("iteration-8 never proposes an occupied VLAN ID", async () => {
+  const core = await readFile(new URL("public/network-core.js", root), "utf8");
+  assert.match(core, /export function nextAvailableVlanId\(site\)[\s\S]*?for \(let id = 1; id <= 4094; id\+\+\) if \(!vlans\.some\(v => v\.vid === id\)\) return id;\s*return null/, "VLAN ID allocation must scan every valid ID and report exhaustion instead of returning an occupied value");
   const app = await readFile(new URL("public/app.js", root), "utf8");
-  assert.match(app, /for\(let id=1;id<=4094;id\+\+\)if\(!site\.vlans\.some\(v=>v\.vid===id\)\)return id;return null/, "nextVid must scan every valid ID and report exhaustion instead of returning an occupied value");
+  assert.match(app, /nextAvailableVlanId/, "the dialog must allocate IDs through the core scan, not a local copy");
 });
 
 test("iteration-9 keeps interrupted gestures honest", async () => {

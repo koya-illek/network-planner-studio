@@ -823,3 +823,141 @@ export function defaultFlowPolicy(source, destination) {
   if (source === "users" && destination === "servers") return "restricted";
   return "restricted";
 }
+
+/*
+ * Recommendation engine. Given what already exists (occupied ranges, VLAN ID
+ * conventions) it produces a compatible site or VLAN plan. Plans carry no
+ * object identities: callers assign ids when merging a plan into a design.
+ * The workspace recommendation dialog and the machine surfaces both run this
+ * one implementation, so they cannot drift into different advice.
+ */
+export const ROLE_DEFAULTS = Object.freeze({
+  users: { name: "Staff", vid: 10 }, voice: { name: "Voice", vid: 20 }, guest: { name: "Guest", vid: 30 },
+  servers: { name: "Servers", vid: 40 }, iot: { name: "IoT", vid: 50 }, management: { name: "Management", vid: 99 },
+  transit: { name: "Transit", vid: 90 }, other: { name: "Network", vid: 60 }
+});
+
+export function nextAvailableVlanId(site) {
+  const vlans = Array.isArray(site?.vlans) ? site.vlans : [];
+  for (const id of [10, 20, 30, 40, 50, 60, 70, 80, 90, 99]) if (!vlans.some(v => v.vid === id)) return id;
+  for (let id = 1; id <= 4094; id++) if (!vlans.some(v => v.vid === id)) return id;
+  return null;
+}
+
+/** The VLAN ID this environment already uses for the role, when free at the site. */
+export function conventionalVlanId(role, site, existingSites = []) {
+  const counts = new Map();
+  for (const existing of Array.isArray(existingSites) ? existingSites : []) {
+    for (const vlan of Array.isArray(existing?.vlans) ? existing.vlans : []) {
+      if (vlan.role === role) counts.set(vlan.vid, (counts.get(vlan.vid) || 0) + 1);
+    }
+  }
+  const ranked = [...counts].sort((a, b) => b[1] - a[1]).map(([vid]) => vid);
+  const vlans = Array.isArray(site?.vlans) ? site.vlans : [];
+  for (const vid of [...ranked, ROLE_DEFAULTS[role]?.vid || 60]) if (!vlans.some(v => v.vid === vid)) return vid;
+  return nextAvailableVlanId(site);
+}
+
+export function sitePlanRoles(siteType) {
+  if (siteType === "cloud" || siteType === "datacentre") return ["servers", "management"];
+  if (siteType === "warehouse") return ["users", "iot", "guest", "management"];
+  return ["users", "voice", "guest", "management"];
+}
+
+const ROLE_DEVICE_SHARE = Object.freeze({ users: 1, voice: .8, guest: 1.2, iot: .65, servers: .45, management: .12 });
+
+export function plannedRoleDevices(role, primaryDevices) {
+  return Math.max(role === "management" ? 12 : 4, Math.ceil(Number(primaryDevices) * (ROLE_DEVICE_SHARE[role] || .5)));
+}
+
+/** Validate plan data through the canonical factory, then drop the probe id. */
+function identityFreeVlan(values) {
+  const { id: _probe, ...vlan } = createVlan({ ...values, id: "plan" });
+  return vlan;
+}
+
+function planInputError(message, path, code) {
+  return new DesignValidationError(message, [issue(path, message, code)]);
+}
+
+/**
+ * Plan a complete compatible site: a free RFC1918 parent block plus one
+ * correctly sized subnet per role, following the environment's VLAN ID
+ * conventions. Deterministic for identical inputs.
+ */
+export function recommendSitePlan({ sites = [], type = "office", devices = 50, growth = 30, name = "" } = {}) {
+  const existingSites = Array.isArray(sites) ? sites : [];
+  if (!has(type, ENUMS.siteTypes)) throw planInputError(`Unknown site type: ${type}`, "type", "invalid-enum");
+  const primary = Math.trunc(Number(devices));
+  if (!Number.isInteger(primary) || primary < 1 || primary > LIMITS.siteDevices[1]) {
+    throw planInputError(`devices must be an integer from 1 to ${LIMITS.siteDevices[1]}`, "devices", "invalid-number");
+  }
+  const plannedGrowth = Number(growth);
+  if (!Number.isFinite(plannedGrowth) || plannedGrowth < LIMITS.growth[0] || plannedGrowth > LIMITS.growth[1]) {
+    throw planInputError(`growth must be from ${LIMITS.growth[0]} to ${LIMITS.growth[1]}`, "growth", "invalid-number");
+  }
+  let cidr;
+  try {
+    cidr = suggestSiteRange(existingSites.map(site => site?.cidr).filter(Boolean), primary);
+  } catch (error) {
+    throw planInputError(error.message, "sites", "unallocatable");
+  }
+  const occupied = [], planned = [], shell = { vlans: [] };
+  for (const role of sitePlanRoles(type)) {
+    const count = plannedRoleDevices(role, primary);
+    let subnet, vid;
+    try { subnet = nextSubnet(cidr, prefixForDevices(count, plannedGrowth), occupied); }
+    catch (error) { throw planInputError(error.message, "sites", "unallocatable"); }
+    vid = conventionalVlanId(role, shell, existingSites);
+    if (vid === null) throw planInputError("This site has no free VLAN IDs", "vlans", "exhausted");
+    const pool = defaultDhcpPool(subnet, 1);
+    const plan = identityFreeVlan({
+      name: ROLE_DEFAULTS[role].name, vid, role, devices: count, cidr: subnet, gateway: firstUsable(subnet),
+      dhcpEnabled: !["servers", "management"].includes(role), reserved: 1,
+      dhcpStart: pool.start, dhcpEnd: pool.end, notes: "Recommended for the new site.", siteCidr: cidr
+    });
+    shell.vlans.push(plan);
+    planned.push(plan);
+    occupied.push(subnet);
+  }
+  // Prove the composed plan passes canonical validation before returning it.
+  createSite({
+    id: "plan", name: String(name || "").trim() || "New site", type, devices: primary,
+    growth: plannedGrowth, cidr, wan: "single", topologyRole: "standalone", internetBreakout: "local",
+    notes: "", x: 20, y: 20, vlans: planned.map((vlan, index) => ({ ...vlan, id: `plan-${index}` }))
+  });
+  return {
+    name: String(name || "").trim() || "New site",
+    type, devices: primary, growth: plannedGrowth, cidr,
+    vlans: planned
+  };
+}
+
+/**
+ * Plan one compatible VLAN inside an existing site: smallest recommended
+ * subnet with the site's growth allowance, using the environment's VLAN ID
+ * convention for the role.
+ */
+export function recommendVlanPlan({ sites = [], siteId, role = "other", devices = 30, name = "" } = {}) {
+  const existingSites = Array.isArray(sites) ? sites : [];
+  if (!has(role, ENUMS.vlanRoles)) throw planInputError(`Unknown VLAN role: ${role}`, "role", "invalid-enum");
+  const site = existingSites.find(candidate => candidate && candidate.id === siteId);
+  if (!site) throw planInputError(`No site matches "${String(siteId ?? "")}".`, "siteId", "unknown-site");
+  const wanted = Math.trunc(Number(devices));
+  if (!Number.isInteger(wanted) || wanted < 1 || wanted > LIMITS.vlanDevices[1]) {
+    throw planInputError(`devices must be an integer from 1 to ${LIMITS.vlanDevices[1]}`, "devices", "invalid-number");
+  }
+  const vid = conventionalVlanId(role, site, existingSites);
+  if (vid === null) throw planInputError(`${site.name || "This site"} has no free VLAN IDs`, "vlans", "exhausted");
+  let cidr;
+  try { cidr = nextSubnet(site.cidr, prefixForDevices(wanted, Number(site.growth) || 30), (site.vlans || []).map(v => v.cidr)); }
+  catch (error) { throw planInputError(error.message, "site.cidr", "unallocatable"); }
+  const dhcpEnabled = !["servers", "management"].includes(role);
+  const pool = defaultDhcpPool(cidr, 1);
+  return identityFreeVlan({
+    name: String(name || "").trim() || ROLE_DEFAULTS[role].name, vid, role, devices: wanted, cidr,
+    gateway: firstUsable(cidr), dhcpEnabled, reserved: 1,
+    dhcpStart: dhcpEnabled ? pool.start : "", dhcpEnd: dhcpEnabled ? pool.end : "",
+    notes: "Recommended by the compatibility assistant.", siteCidr: site.cidr
+  });
+}

@@ -1,4 +1,4 @@
-import {SCHEMA_ID,SCHEMA_VERSION,ENUMS,DesignValidationError,parseCidr,parseRoutePrefix,rangesOverlap,contains,firstUsable,endpointCapacity,defaultDhcpPool,validateGateway,validateDhcpPool,prefixForDevices,nextSubnet,suggestSiteRange as suggestSiteRangeCore,reviewDesignIssues,designScore,defaultFlowPolicy,guardCsvCell,unguardCsvCell,parseCsvRows,shortestPath,migrateDesign,createSite,createVlan,createLink} from "./network-core.js";
+import {SCHEMA_ID,SCHEMA_VERSION,ENUMS,DesignValidationError,parseCidr,parseRoutePrefix,rangesOverlap,contains,firstUsable,endpointCapacity,defaultDhcpPool,validateGateway,validateDhcpPool,prefixForDevices,nextSubnet,nextAvailableVlanId,suggestSiteRange as suggestSiteRangeCore,recommendSitePlan as recommendSitePlanCore,recommendVlanPlan as recommendVlanPlanCore,reviewDesignIssues,designScore,defaultFlowPolicy,guardCsvCell,unguardCsvCell,parseCsvRows,shortestPath,migrateDesign,createSite,createVlan,createLink} from "./network-core.js";
 
 const STORAGE_KEY = "network-planner-studio.v1";
 const LIBRARY_KEY = "network-planner-studio.projects.v1";
@@ -435,7 +435,7 @@ function openVlanDialog(siteId,vlanId=null){
   const found=vlanId&&findVlan(vlanId),site=found?.site||state.sites.find(s=>s.id===form.elements.siteId.value);
   $("#vlan-dialog-title").textContent=found?"Edit VLAN":"Add a VLAN";$("#vlan-submit").textContent=found?"Save changes":"Add VLAN";
   if(found){form.elements.siteId.value=found.site.id;for(const key of ["name","vid","role","devices","cidr","gateway","dhcpStart","dhcpEnd","notes"])form.elements[key].value=found.vlan[key]??"";form.elements.dhcpEnabled.value=String(found.vlan.dhcpEnabled!==false);form.elements.reserved.value=found.vlan.reserved??1}
-  else{const vid=nextVid(site);if(vid===null){editingVlanId=null;return showToast(`${site.name} has no free VLAN IDs`)}form.elements.vid.value=vid;form.elements.devices.value=30;form.elements.reserved.value=1}
+  else{const vid=nextAvailableVlanId(site);if(vid===null){editingVlanId=null;return showToast(`${site.name} has no free VLAN IDs`)}form.elements.vid.value=vid;form.elements.devices.value=30;form.elements.reserved.value=1}
   form.elements.siteId.disabled=Boolean(found);$("#vlan-form-error").textContent="";$("#vlan-dialog").showModal();setTimeout(()=>form.elements.name.focus(),50);
 }
 function openConnectDialog(fromId,linkId=null){
@@ -446,51 +446,24 @@ function openConnectDialog(fromId,linkId=null){
   else{if(fromId)form.elements.from.value=fromId;form.elements.to.value=state.sites.find(s=>s.id!==form.elements.from.value)?.id||""}
   $("#connect-form-error").textContent="";$("#connect-dialog").showModal();
 }
-function nextVid(site){if(!site)return 10;for(const id of [10,20,30,40,50,60,70,80,90,99])if(!site.vlans.some(v=>v.vid===id))return id;for(let id=1;id<=4094;id++)if(!site.vlans.some(v=>v.vid===id))return id;return null}
-
-const ROLE_DEFAULTS={
-  users:{name:"Staff",vid:10},voice:{name:"Voice",vid:20},guest:{name:"Guest",vid:30},
-  servers:{name:"Servers",vid:40},iot:{name:"IoT",vid:50},management:{name:"Management",vid:99},
-  transit:{name:"Transit",vid:90},other:{name:"Network",vid:60}
-};
-function conventionalVid(role,site={vlans:[]}){
-  const counts=new Map();
-  state.sites.flatMap(s=>s.vlans).filter(v=>v.role===role).forEach(v=>counts.set(v.vid,(counts.get(v.vid)||0)+1));
-  const ranked=[...counts].sort((a,b)=>b[1]-a[1]).map(([vid])=>vid);
-  for(const vid of [...ranked,ROLE_DEFAULTS[role]?.vid||60]) if(!site.vlans.some(v=>v.vid===vid))return vid;
-  return nextVid(site);
-}
-function siteRoles(type){
-  if(type==="cloud")return["servers","management"];
-  if(type==="datacentre")return["servers","management"];
-  if(type==="warehouse")return["users","iot","guest","management"];
-  return["users","voice","guest","management"];
-}
-function roleDevices(role,primary){
-  return Math.max(role==="management"?12:4,Math.ceil(primary*({users:1,voice:.8,guest:1.2,iot:.65,servers:.45,management:.12}[role]||.5)));
-}
 function busiestHub(){
   return [...state.sites].sort((a,b)=>connectionsFor(b.id)-connectionsFor(a.id)||b.vlans.length-a.vlans.length)[0];
 }
+// The planning heuristics live in the core model; this dialog only layers
+// workspace intent (naming, connection, canvas placement) onto the plan.
 function buildRecommendation(){
   const form=$("#recommend-form"),fd=new FormData(form),kind=fd.get("kind");
   $("#recommend-error").textContent="";
   try{
     if(kind==="site"){
-      const name=String(fd.get("siteName")||"").trim()||"New site",type=fd.get("siteType"),devices=Math.max(1,+fd.get("siteDevices")),growth=+fd.get("siteGrowth");
-      const cidr=suggestSiteRange(devices),shell={vlans:[]},vlans=[],occupied=[];
-      for(const role of siteRoles(type)){
-        const count=roleDevices(role,devices),prefix=prefixForDevices(count,growth),subnet=nextSubnet(cidr,prefix,occupied),vid=conventionalVid(role,shell);if(vid===null)throw new Error("This site has no free VLAN IDs");
-        const pool=defaultDhcpPool(subnet,1),proposed=createVlan({id:uid(),name:ROLE_DEFAULTS[role].name,vid,role,devices:count,cidr:subnet,gateway:firstUsable(subnet),dhcpEnabled:!["servers","management"].includes(role),reserved:1,dhcpStart:pool.start,dhcpEnd:pool.end,notes:"Recommended for the new site.",siteCidr:cidr});
-        shell.vlans.push(proposed);vlans.push(proposed);occupied.push(subnet);
-      }
-      pendingRecommendation={kind,id:uid(),name,type,devices,growth,cidr,wan:"single",topologyRole:fd.get("connectTo")?"spoke":"standalone",hubId:fd.get("connectTo")||null,internetBreakout:fd.get("connectTo")?"hub":"local",notes:"Generated by the compatibility assistant.",x:15+(state.sites.length%3)*30,y:18+Math.floor(state.sites.length/3)*32,vlans,connectTo:fd.get("connectTo")};
+      const connectTo=fd.get("connectTo");
+      const plan=recommendSitePlanCore({sites:state.sites,type:fd.get("siteType"),devices:+fd.get("siteDevices"),growth:+fd.get("siteGrowth"),name:String(fd.get("siteName")||"").trim()});
+      pendingRecommendation={kind,id:uid(),wan:"single",topologyRole:connectTo?"spoke":"standalone",hubId:connectTo||null,internetBreakout:connectTo?"hub":"local",notes:"Generated by the compatibility assistant.",x:15+(state.sites.length%3)*30,y:18+Math.floor(state.sites.length/3)*32,connectTo,...plan};
       renderRecommendationPreview();
     }else{
       const site=state.sites.find(s=>s.id===fd.get("vlanSite"));if(!site)throw new Error("Add or select a site before requesting a VLAN");
-      const role=fd.get("vlanRole"),devices=Math.max(1,+fd.get("vlanDevices")),vid=conventionalVid(role,site);if(vid===null)throw new Error(`${site.name} has no free VLAN IDs`);const prefix=prefixForDevices(devices,site.growth),cidr=nextSubnet(site.cidr,prefix,site.vlans.map(v=>v.cidr));
-      const dhcpEnabled=!(["servers","management"].includes(role)),pool=defaultDhcpPool(cidr,1);
-      pendingRecommendation={kind,siteId:site.id,id:uid(),name:String(fd.get("vlanName")||"").trim()||ROLE_DEFAULTS[role].name,role,devices,vid,cidr,gateway:firstUsable(cidr),dhcpEnabled,reserved:1,dhcpStart:dhcpEnabled?pool.start:"",dhcpEnd:dhcpEnabled?pool.end:"",notes:"Recommended by the compatibility assistant."};
+      const plan=recommendVlanPlanCore({sites:state.sites,siteId:site.id,role:fd.get("vlanRole"),devices:+fd.get("vlanDevices"),name:String(fd.get("vlanName")||"").trim()});
+      pendingRecommendation={kind,id:uid(),siteId:site.id,...plan};
       renderRecommendationPreview();
     }
   }catch(err){pendingRecommendation=null;$("#recommend-preview").className="recommend-preview empty";$("#recommend-preview").textContent="A compatible proposal could not be produced.";$("#recommend-error").textContent=err.message}
@@ -529,11 +502,12 @@ function applyRecommendation(){
   const p=pendingRecommendation;if(!p)return;
   pushHistory();
   if(p.kind==="site"){
-    const site=createSite({id:p.id,name:p.name,type:p.type,devices:p.devices,growth:p.growth,cidr:p.cidr,wan:p.wan,topologyRole:p.topologyRole,hubId:p.hubId,internetBreakout:p.internetBreakout,notes:p.notes,x:p.x,y:p.y,vlans:p.vlans});state.sites.push(site);
+    const site=createSite({id:p.id,name:p.name,type:p.type,devices:p.devices,growth:p.growth,cidr:p.cidr,wan:p.wan,topologyRole:p.topologyRole,hubId:p.hubId,internetBreakout:p.internetBreakout,notes:p.notes,x:p.x,y:p.y,vlans:p.vlans.map(v=>createVlan({...v,id:uid(),siteCidr:p.cidr}))});
+    state.sites.push(site);
     if(p.connectTo){const hub=state.sites.find(s=>s.id===p.connectTo);state.links.push(createLink({id:uid(),from:p.connectTo,to:site.id,type:"vpn",resilience:"single",routingType:"static",transitAllowed:true,defaultRoute:true,advertisedPrefixes:["0.0.0.0/0",hub?.cidr,site.cidr].filter(Boolean)}))}
     selected={type:"site",id:site.id};showToast(`${site.name} added with ${site.vlans.length} recommended VLANs`);
   }else{
-    const site=state.sites.find(s=>s.id===p.siteId);if(!site)return;site.vlans.push(createVlan({...p,siteCidr:site.cidr}));selected={type:"vlan",id:p.id};showToast(`${p.name} added as ${p.cidr}`);
+    const site=state.sites.find(s=>s.id===p.siteId);if(!site)return;const vlan=createVlan({...p,id:uid(),siteCidr:site.cidr});site.vlans.push(vlan);selected={type:"vlan",id:vlan.id};showToast(`${vlan.name} added as ${vlan.cidr}`);
   }
   $("#recommend-dialog").close();pendingRecommendation=null;touch();
 }

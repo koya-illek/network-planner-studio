@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  recommendSitePlan,recommendVlanPlan,
   parseCidr,rangesOverlap,contains,endpointCapacity,prefixForDevices,nextSubnet,
   suggestSiteRange,isPrivateCidr,isPrivateRoutePrefix,shortestPath,migrateDesign,defaultDhcpPool,validHostInSubnet,parseRoutePrefix,validateGateway,validateDhcpPool,validateDesign,guardCsvCell,unguardCsvCell,parseCsvRows,intToIp,firstUsable,SCHEMA_ID,SCHEMA_VERSION
 } from "../public/network-core.js";
@@ -309,4 +310,140 @@ test("CSV records reject malformed quote boundaries",()=>{
   assert.throws(()=>parseCsvRows('Name,Notes\nCork,"unfinished'),/unclosed quoted field/);
   assert.throws(()=>parseCsvRows('Name,Notes\nCork,bad"quote'),/unexpected quote/);
   assert.throws(()=>parseCsvRows('Name,Notes\nCork,"done"tail'),/content after a closing quote/);
+});
+
+/* Recommendation engine: one planning brain shared by the dialog and machines. */
+
+// A valid three-site environment: users mostly ride VID 10, Dublin diverged
+// to 11, management lives on 97, guest on 30.
+const existingEnvironment = () => [
+  {
+    id: "hq", name: "Cork HQ", type: "office", cidr: "10.20.0.0/16", devices: 180, wan: "dual",
+    growth: 30, topologyRole: "hub", hubId: null, internetBreakout: "local",
+    vlans: [
+      { id: "hq-u", name: "Staff", vid: 10, role: "users", devices: 100, cidr: "10.20.10.0/24", gateway: "10.20.10.1", dhcpEnabled: true, reserved: 1, dhcpStart: "10.20.10.2", dhcpEnd: "10.20.10.254" },
+      { id: "hq-m", name: "Mgmt", vid: 97, role: "management", devices: 12, cidr: "10.20.99.0/27", gateway: "10.20.99.1", dhcpEnabled: false, reserved: 1, dhcpStart: "", dhcpEnd: "" }
+    ]
+  },
+  {
+    id: "b1", name: "Dublin", type: "branch", cidr: "10.30.0.0/16", devices: 60, wan: "single",
+    growth: 30, topologyRole: "spoke", hubId: "hq", internetBreakout: "hub",
+    vlans: [
+      { id: "b1-u", name: "Staff", vid: 11, role: "users", devices: 40, cidr: "10.30.10.0/24", gateway: "10.30.10.1", dhcpEnabled: true, reserved: 1, dhcpStart: "10.30.10.2", dhcpEnd: "10.30.10.254" },
+      { id: "b1-g", name: "Guest", vid: 30, role: "guest", devices: 20, cidr: "10.30.30.0/24", gateway: "10.30.30.1", dhcpEnabled: true, reserved: 1, dhcpStart: "10.30.30.2", dhcpEnd: "10.30.30.254" }
+    ]
+  },
+  {
+    id: "lab", name: "Cork lab", type: "office", cidr: "10.40.0.0/16", devices: 30, wan: "single",
+    growth: 30, topologyRole: "standalone", hubId: null, internetBreakout: "local",
+    vlans: [
+      { id: "lab-u", name: "Users", vid: 10, role: "users", devices: 20, cidr: "10.40.10.0/24", gateway: "10.40.10.1", dhcpEnabled: true, reserved: 1, dhcpStart: "10.40.10.2", dhcpEnd: "10.40.10.254" }
+    ]
+  }
+];
+
+test("the recommendation fixture is itself a valid canonical design",()=>{
+  const sites=existingEnvironment();
+  const result=validateDesign({schema:SCHEMA_ID,version:SCHEMA_VERSION,topologyMode:"custom",policies:{spokeToSpoke:"via-hub"},flowPolicies:{},links:[],sites});
+  assert.deepEqual(result.errors,[]);
+});
+
+test("plans a complete office site with role subnets and environment conventions",()=>{
+  const plan=recommendSitePlan({sites:existingEnvironment(),type:"office",devices:50,growth:30,name:"Limerick office"});
+  assert.equal(plan.name,"Limerick office");
+  assert.equal(plan.type,"office");
+  assert.equal(plan.devices,50);
+  assert.deepEqual(plan.vlans.map(v=>v.role),["users","voice","guest","management"]);
+  // Users follow the dominant VID 10 convention, voice takes its default,
+  // guest and management follow the environment's 30 / 97 usage.
+  assert.deepEqual(plan.vlans.map(v=>v.vid),[10,20,30,97]);
+  assert.deepEqual(plan.vlans.map(v=>v.name),["Staff","Voice","Guest","Management"]);
+  assert.deepEqual(plan.vlans.map(v=>v.devices),[50,40,60,12]);
+  const parent=parseCidr(plan.cidr);
+  for(const vlan of plan.vlans){
+    const child=parseCidr(vlan.cidr);
+    assert.ok(child.network>=parent.network&&child.broadcast<=parent.broadcast,vlan.cidr);
+    assert.ok(vlan.dhcpEnabled===(vlan.role!=="management"));
+    if(vlan.dhcpEnabled)assert.ok(vlan.dhcpStart&&vlan.dhcpEnd);
+  }
+  for(let i=1;i<plan.vlans.length;i++)assert.equal(rangesOverlap(plan.vlans[i-1].cidr,plan.vlans[i].cidr),false);
+});
+
+test("site plans size each role subnet with growth via the shared prefix rule",()=>{
+  const staff=recommendSitePlan({type:"office",devices:50,growth:30}).vlans.find(v=>v.role==="users");
+  assert.equal(parseCidr(staff.cidr).prefix,prefixForDevices(50,30));
+});
+
+test("plans cloud and warehouse sites with their own role sets",()=>{
+  assert.deepEqual(recommendSitePlan({type:"cloud"}).vlans.map(v=>v.role),["servers","management"]);
+  assert.deepEqual(recommendSitePlan({type:"warehouse",devices:80}).vlans.map(v=>v.role),["users","iot","guest","management"]);
+});
+
+test("greenfield plans work without any existing sites",()=>{
+  const plan=recommendSitePlan({type:"office",devices:120});
+  assert.deepEqual(plan.vlans.map(v=>v.vid),[10,20,30,99]);
+  assert.ok(plan.cidr.startsWith("10.")||plan.cidr.startsWith("172.")||plan.cidr.startsWith("192.168."));
+});
+
+test("site plans are deterministic and carry no object identities",()=>{
+  const first=recommendSitePlan({sites:existingEnvironment(),type:"office",devices:50});
+  const second=recommendSitePlan({sites:existingEnvironment(),type:"office",devices:50});
+  assert.deepEqual(first,second);
+  for(const vlan of first.vlans)assert.equal(vlan.id,undefined);
+});
+
+test("a composed site plan passes canonical design validation unchanged",()=>{
+  const plan=recommendSitePlan({sites:existingEnvironment(),type:"branch",devices:60});
+  const design={schema:SCHEMA_ID,version:SCHEMA_VERSION,topologyMode:"custom",policies:{spokeToSpoke:"via-hub"},flowPolicies:{},links:[],
+    sites:[...existingEnvironment(),{id:"new-site",name:plan.name,type:plan.type,cidr:plan.cidr,devices:plan.devices,wan:"single",growth:plan.growth,x:20,y:20,topologyRole:"standalone",hubId:null,internetBreakout:"local",vlans:plan.vlans.map((v,i)=>({...v,id:`new-${i}`}))}]};
+  assert.deepEqual(validateDesign(design).errors,[]);
+});
+
+test("site planning rejects impossible inputs with evidence",()=>{
+  assert.throws(()=>recommendSitePlan({type:"spaceship"}),/Unknown site type/);
+  assert.throws(()=>recommendSitePlan({devices:0}),/devices must be an integer/);
+  assert.throws(()=>recommendSitePlan({devices:99999}),/devices must be an integer/);
+  assert.throws(()=>recommendSitePlan({growth:-5}),/growth must be/);
+  const full=existingEnvironment().concat([{id:"x",cidr:"10.0.0.0/8",vlans:[]},{id:"y",cidr:"172.16.0.0/12",vlans:[]},{id:"z",cidr:"192.168.0.0/16",vlans:[]}]);
+  assert.throws(()=>recommendSitePlan({sites:full}),/No compatible private site block remains/);
+});
+
+test("plans a VLAN inside an existing site following conventions",()=>{
+  const sites=existingEnvironment();
+  const plan=recommendVlanPlan({sites,siteId:"hq",role:"guest",devices:30});
+  assert.equal(plan.vid,30);
+  assert.equal(plan.name,"Guest");
+  assert.ok(contains(sites[0].cidr,plan.cidr));
+  assert.equal(rangesOverlap(plan.cidr,sites[0].vlans[0].cidr),false);
+  assert.equal(plan.gateway,firstUsable(plan.cidr));
+  assert.equal(plan.dhcpEnabled,true);
+});
+
+test("VLAN plans honour the most-used convention before the default",()=>{
+  const plan=recommendVlanPlan({sites:existingEnvironment(),siteId:"b1",role:"users",devices:20});
+  assert.equal(plan.vid,10);
+});
+
+test("VLAN plans fall down the ranking when the top convention is taken at the site",()=>{
+  const plan=recommendVlanPlan({sites:existingEnvironment(),siteId:"hq",role:"users",devices:20});
+  assert.notEqual(plan.vid,10);
+  assert.equal([20,30,40,50,60,70,80,90,99].includes(plan.vid)||Number.isInteger(plan.vid),true);
+});
+
+test("VLAN plans disable DHCP for infrastructure roles and accept custom names",()=>{
+  const servers=recommendVlanPlan({sites:existingEnvironment(),siteId:"hq",role:"servers",devices:20,name:"Database"});
+  assert.equal(servers.dhcpEnabled,false);
+  assert.equal(servers.dhcpStart,"");
+  assert.equal(servers.dhcpEnd,"");
+  assert.equal(servers.name,"Database");
+});
+
+test("VLAN planning rejects unknown sites, roles and unallocatable ranges",()=>{
+  const sites=existingEnvironment();
+  assert.throws(()=>recommendVlanPlan({sites,siteId:"nope"}),/No site matches/);
+  assert.throws(()=>recommendVlanPlan({sites,siteId:"hq",role:"hologram"}),/Unknown VLAN role/);
+  assert.throws(()=>recommendVlanPlan({sites,siteId:"hq",devices:0}),/devices must be an integer/);
+  const packed={id:"packed",name:"Packed",cidr:"10.99.0.0/30",
+    vlans:[{id:"p1",name:"Transit",vid:90,role:"transit",devices:2,cidr:"10.99.0.0/31",gateway:"10.99.0.0",dhcpEnabled:false,reserved:1,dhcpStart:"",dhcpEnd:""}]};
+  assert.throws(()=>recommendVlanPlan({sites:[packed],siteId:"packed",role:"other",devices:2}),/fit inside the site range/);
 });
