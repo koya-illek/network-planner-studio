@@ -291,10 +291,12 @@ function renderCanvas(){
   if($("#topology-view").hidden||$("#workspace").classList.contains("hidden")){canvasDirty=true;return}
   canvasDirty=false;
   const layer=$("#node-layer"),svg=$("#link-layer"),geom=canvasGeometry();
-  layer.innerHTML="";svg.innerHTML="";
   svg.setAttribute("viewBox",`0 0 ${geom.w} ${geom.h}`);
+  // Endpoint lookup through a Map: scanning every site per link endpoint
+  // made dense topologies pay O(links x sites) per full pass.
+  const byId=new Map(state.sites.map(s=>[s.id,s]));
   for(const link of state.links){
-    const a=state.sites.find(s=>s.id===link.from),b=state.sites.find(s=>s.id===link.to);if(!a||!b)continue;
+    const a=byId.get(link.from),b=byId.get(link.to);if(!a||!b)continue;
     const shape=linkGeometry(a,b,geom);
     svg.insertAdjacentHTML("beforeend",`<path id="route-${link.id}" d="${shape.d}" class="link ${link.resilience==="dual"?"dual":""}"/><path d="${shape.d}" class="link-hit" data-link="${link.id}" tabindex="0" role="button" aria-label="${escapeHtml(`${a.name} to ${b.name}: ${linkLabel(link).toLowerCase()}, ${link.resilience==="dual"?"redundant paths":"single path"}`)}"/><text class="link-label" data-link="${link.id}" x="${shape.midX}" y="${shape.midY-7}" text-anchor="middle">${linkLabel(link)}</text>`);
   }
