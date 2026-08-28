@@ -12,6 +12,10 @@ import {
 } from "./public/network-core.js";
 
 export const API_BODY_LIMIT_BYTES = 1024 * 1024;
+// Count caps sit alongside the byte cap: a 1MB body can still hold thousands
+// of tiny sites/links, and dense graphs push shortestPath toward O(V^2).
+export const API_MAX_SITES = 500;
+export const API_MAX_LINKS = 2000;
 
 export class HttpProblem extends Error {
   constructor(status, code, message) {
@@ -80,6 +84,12 @@ function parseDesign(rawDesign) {
       throw new HttpProblem(400, "invalid_design", `${error.message} The design must be a JSON object with sites and links arrays.`);
     }
     throw error;
+  }
+  if (Array.isArray(migrated.sites) && migrated.sites.length > API_MAX_SITES) {
+    throw new HttpProblem(413, "design_too_large", `Designs are limited to ${API_MAX_SITES} sites; this one has ${migrated.sites.length}.`);
+  }
+  if (Array.isArray(migrated.links) && migrated.links.length > API_MAX_LINKS) {
+    throw new HttpProblem(413, "design_too_large", `Designs are limited to ${API_MAX_LINKS} links; this one has ${migrated.links.length}.`);
   }
   return migrated;
 }

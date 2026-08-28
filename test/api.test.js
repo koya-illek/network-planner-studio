@@ -148,6 +148,24 @@ test("the body cap counts bytes, not UTF-16 characters", async () => {
   assert.equal((await response.json()).error.code, "payload_too_large");
 });
 
+test("designs over the site/link count caps are rejected before compute", async () => {
+  const base = validDesign();
+  const siteTemplate = base.sites[0];
+  const manySites = Array.from({ length: 501 }, (_, i) => ({
+    ...siteTemplate,
+    id: `s${i}`, name: `Site ${i}`, cidr: `10.${(i >> 8) & 255}.${i & 255}.0/24`, vlans: []
+  }));
+  const sitesResponse = await postJson("/api/v1/validate", { design: { ...base, sites: manySites } });
+  assert.equal(sitesResponse.status, 413);
+  assert.equal((await sitesResponse.json()).error.code, "design_too_large");
+
+  const linkTemplate = base.links[0];
+  const manyLinks = Array.from({ length: 2001 }, (_, i) => ({ ...linkTemplate, id: `l${i}` }));
+  const linksResponse = await postJson("/api/v1/validate", { design: { ...base, links: manyLinks } });
+  assert.equal(linksResponse.status, 413);
+  assert.equal((await linksResponse.json()).error.code, "design_too_large");
+});
+
 test("methods are guarded per route and preflight is answered", async () => {
   const wrongMethod = await fetchApi("/api/v1/validate");
   assert.equal(wrongMethod.status, 405);
