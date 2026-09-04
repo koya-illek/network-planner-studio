@@ -170,9 +170,13 @@ One Cloudflare Worker serves `network.illek.ie` and the compatibility hostname `
 
 ## Non-goals
 
+Address capacities and DHCP pools use generic IPv4 rules. The hosted-network example deliberately names no cloud provider. Provider reservations and managed DHCP rules require separate validation and are disclosed in the address plan and exported implementation report. Route tracing and traffic policies express design intent, not deployed reachability or enforcement.
+
 The current product does not support IPv6, VRF, live discovery, controller login, configuration generation, configuration pushing, cloud collaboration, tenant accounts, or vendor-specific deployment validation.
 
 ## Verification map
+
+Network calculations, import/export behaviour, API boundaries, and interactive regressions remain covered. Source-text tests for CSS and function wiring have been removed. Select the affected browser path instead of repeating the complete release suite after small changes.
 
 - Core schema and network tests: `npm test`
 - REST and MCP surface tests: `test/api.test.js`, `test/mcp.test.js`, `tests/api.spec.js`

@@ -129,7 +129,7 @@
             </div>
           </div>
           <div id="trace-bar" class="trace-bar hidden">
-            <div><span class="pulse-dot"></span><strong id="trace-title">Tracing path</strong><small id="trace-detail" aria-live="polite"></small></div>
+            <div><span class="pulse-dot"></span><strong id="trace-title">Tracing modelled path</strong><small id="trace-detail" aria-live="polite"></small><small>Modelled policy only. Live routing, firewalls and reachability are not tested.</small></div>
             <button class="icon-button" id="close-trace" type="button" aria-label="Close trace">×</button>
           </div>
         </section>
@@ -146,7 +146,7 @@
       <div id="addressing-view" class="view" role="tabpanel" aria-labelledby="tab-addressing" tabindex="0">
         <section class="page-view">
           <div class="page-heading">
-            <div><h2>IPv4 address plan</h2><p>A hierarchical view of every site and VLAN in the environment.</p></div>
+            <div><h2>IPv4 address plan</h2><p>Generic IPv4 capacities. Verify cloud-provider reservations and managed DHCP rules separately.</p></div>
             <div><button class="button ghost" id="csv-export" type="button">Export CSV</button> <button class="button primary" id="add-vlan-address" type="button">+ Add VLAN</button></div>
           </div>
           <div id="address-summary" class="summary-grid"></div>

@@ -1000,9 +1000,9 @@ export function exampleDesign() {
     ])
   });
   const cloud = createSite({
-    id: "cloud", name: "Azure production", type: "cloud", cidr: "10.80.0.0/16", devices: 40,
+    id: "cloud", name: "Hosted network", type: "cloud", cidr: "10.80.0.0/16", devices: 40,
     wan: "none", growth: 50, x: 42, y: 72, topologyRole: "spoke", hubId: "hq",
-    internetBreakout: "hub", notes: "",
+    internetBreakout: "hub", notes: "Generic IPv4 example. Cloud-provider address reservations and managed DHCP rules are not modelled; verify them before implementation.",
     vlans: vlansFor("10.80.0.0/16", [
       { id: "cloud-apps", name: "Applications", vid: 40, role: "servers", devices: 28, cidr: "10.80.10.0/26" },
       { id: "cloud-endpoints", name: "Private endpoints", vid: 50, role: "servers", devices: 18, cidr: "10.80.20.0/27" }

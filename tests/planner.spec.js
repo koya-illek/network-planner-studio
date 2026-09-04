@@ -12,9 +12,9 @@ test("traces between spokes through the hub", async ({ page }) => {
   await page.getByRole("button", { name: "Trace path", exact: true }).click();
   const options=await page.locator("#trace-form select[name=from] option").evaluateAll(es=>es.map(e=>({text:e.textContent,value:e.value})));
   await page.locator("#trace-form select[name=from]").selectOption(options.find(o=>o.text.includes("Dublin")).value);
-  await page.locator("#trace-form select[name=to]").selectOption(options.find(o=>o.text.includes("Azure")).value);
+  await page.locator("#trace-form select[name=to]").selectOption(options.find(o=>o.text.includes("Hosted")).value);
   await page.locator("#trace-form button[type=submit]").click();
-  await expect(page.locator("#trace-detail")).toHaveText("Dublin office → Cork HQ → Azure production");
+  await expect(page.locator("#trace-detail")).toHaveText("Dublin office → Cork HQ → Hosted network");
 });
 
 test("hub policy can deny spoke-to-spoke routing", async ({ page }) => {
@@ -24,7 +24,7 @@ test("hub policy can deny spoke-to-spoke routing", async ({ page }) => {
   await page.getByRole("button", { name: "Trace path", exact: true }).click();
   const options=await page.locator("#trace-form select[name=from] option").evaluateAll(es=>es.map(e=>({text:e.textContent,value:e.value})));
   await page.locator("#trace-form select[name=from]").selectOption(options.find(o=>o.text.includes("Dublin")).value);
-  await page.locator("#trace-form select[name=to]").selectOption(options.find(o=>o.text.includes("Azure")).value);
+  await page.locator("#trace-form select[name=to]").selectOption(options.find(o=>o.text.includes("Hosted")).value);
   await page.locator("#trace-form button[type=submit]").click();
   await expect(page.locator("#trace-detail")).toContainText("No permitted route");
 });
