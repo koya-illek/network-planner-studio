@@ -1,5 +1,11 @@
 # Network Planner Studio architecture
 
+## Interface decisions, 2026-09-05
+
+Mobile view tabs use short labels, retain their complete accessible names,
+and scroll horizontally without wrapping. Activating a view keeps its tab
+visible, including keyboard navigation to the final report.
+
 Last reviewed: 2026-08-23 (round 4)
 
 Network Planner Studio is a local-first IPv4 design workbench. Cloudflare serves the application, while network designs, calculations, history, and exports remain in the user's browser unless the user deliberately downloads or imports a file. A stateless machine surface (`/api/v1`, `/mcp`) exposes the same planning engine to scripts and AI agents; submitted documents are computed and discarded, never stored.

@@ -219,6 +219,7 @@ function activateView(view, moveFocus=false){
   buildView(view);
   if(view==="topology"&&canvasDirty){const keeper=focusKeeper();renderCanvas();restoreFocus(keeper)}
   if(moveFocus)document.querySelector(`[data-view="${view}"]`)?.focus();
+  document.querySelector(`[data-view="${view}"]`)?.scrollIntoView({block:"nearest",inline:"nearest",behavior:"instant"});
 }
 function currentView(){return $(".view.active")?.id.replace("-view","")||"topology"}
 

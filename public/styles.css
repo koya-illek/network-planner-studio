@@ -176,3 +176,8 @@ textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(77,163,255,.2)
   .top-actions{gap:6px}
   .top-actions .button{min-height:44px;padding-inline:10px}
 }
+
+@media(max-width:700px) {
+  .view-tabs { height:auto; min-height:52px; display:flex; overflow-x:auto; align-items:stretch; scrollbar-width:thin; }
+  .view-tabs button { flex:0 0 auto; min-height:48px; white-space:nowrap; padding:10px 12px; }
+}
