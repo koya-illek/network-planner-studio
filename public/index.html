@@ -270,7 +270,7 @@
       <div id="recommend-site-fields" class="form-grid">
         <label class="wide">Site name<input name="siteName" maxlength="100" placeholder="e.g. Limerick office" value="New office"></label>
         <label>Site type<select name="siteType"><option value="office">Office</option><option value="branch">Branch</option><option value="warehouse">Warehouse</option><option value="datacentre">Data centre</option><option value="cloud">Cloud</option></select></label>
-        <label>People / primary devices<input name="siteDevices" type="number" min="1" max="5000" value="50"></label>
+        <label>People / primary devices<input name="siteDevices" type="number" min="1" max="50000" value="50"></label>
         <label>Growth allowance<select name="siteGrowth"><option value="30">30% recommended</option><option value="20">20%</option><option value="50">50%</option></select></label>
         <label>Connect to<select name="connectTo"><option value="">No VPN yet</option></select></label>
       </div>
@@ -295,7 +295,6 @@
         <label>Spoke-to-spoke traffic<select name="spokeToSpoke"><option value="via-hub">Allowed through hub</option><option value="denied">Denied / isolated</option></select></label>
         <label>Internet breakout<select name="internetBreakout"><option value="hub">Centralized at hub</option><option value="local">Local at each spoke</option><option value="none">No internet path</option></select></label>
         <label class="wide check-label"><input name="centralizedInspection" type="checkbox" checked> Route inter-site traffic through centralized inspection</label>
-        <label class="wide check-label"><input name="createLinks" type="checkbox" checked> Create missing VPN links between the hub and every spoke</label>
       </div>
       <div id="hub-form-error" class="form-error" aria-live="polite"></div>
       <div class="dialog-actions"><button class="button ghost" type="button" data-close-dialog>Cancel</button><button class="button primary" type="submit">Apply hub-and-spoke design</button></div>

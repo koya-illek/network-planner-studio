@@ -7,6 +7,10 @@
 
 export const SCHEMA_ID = "network-planner-studio/design";
 export const SCHEMA_VERSION = 3;
+// Import/migrate reject oversized documents before walking them, so a
+// hostile or legacy file cannot freeze the browser tab.
+export const DESIGN_MAX_SITES = 500;
+export const DESIGN_MAX_LINKS = 2000;
 
 export const ENUMS = Object.freeze({
   siteTypes: Object.freeze(["office", "branch", "datacentre", "cloud", "warehouse"]),
@@ -569,6 +573,10 @@ function validateNormalizedDesign(design, { allowIncomplete = false } = {}) {
         if (vlan.cidr && other?.cidr && rangesOverlap(vlan.cidr, other.cidr)) errors.push(issue(`${path}.cidr`, `${vlan.cidr} overlaps ${other.name}`, "overlap"));
       }
     }
+    for (let otherIndex = 0; otherIndex < siteIndex; otherIndex++) {
+      const other = design.sites[otherIndex];
+      if (site.cidr && other?.cidr && rangesOverlap(site.cidr, other.cidr)) errors.push(issue(`${sitePath}.cidr`, `${site.cidr} overlaps ${other.name}`, "overlap"));
+    }
   }
   for (const [linkIndex, link] of (design.links || []).entries()) {
     const path = `links[${linkIndex}]`;
@@ -582,9 +590,25 @@ function validateNormalizedDesign(design, { allowIncomplete = false } = {}) {
     if (link.defaultRoute && !link.advertisedPrefixes.includes("0.0.0.0/0")) warnings.push(issue(`${path}.defaultRoute`, "Default route intent is enabled and will be reported as 0.0.0.0/0", "default-route"));
   }
   if (design.topologyMode === "hub-spoke") {
-    const hubs = design.sites.filter(site => site.topologyRole === "hub");
+    const sites = design.sites || [];
+    const links = design.links || [];
+    const hubs = sites.filter(site => site.topologyRole === "hub");
     if (!hubs.length) errors.push(issue("sites", "Hub-and-spoke mode requires at least one hub", "missing-hub"));
-    for (const site of design.sites.filter(candidate => candidate.topologyRole === "spoke")) if (site.hubId && !siteIds.has(site.hubId)) errors.push(issue(`sites.${site.id}.hubId`, "Spoke hub assignment is invalid", "invalid-hub"));
+    const secondaryHubId = design.policies?.secondaryHubId;
+    if (secondaryHubId) {
+      const secondary = sites.find(site => site.id === secondaryHubId);
+      if (!secondary || secondary.topologyRole !== "hub") errors.push(issue("policies.secondaryHubId", "Secondary hub assignment is invalid", "invalid-hub"));
+    }
+    for (const [spokeIndex, site] of sites.entries()) {
+      if (site.topologyRole !== "spoke") continue;
+      const hub = sites.find(candidate => candidate.id === site.hubId);
+      if (!hub || hub.topologyRole !== "hub") {
+        errors.push(issue(`sites[${spokeIndex}].hubId`, "Spoke hub assignment is invalid", "invalid-hub"));
+        continue;
+      }
+      const linked = links.some(link => (link.from === site.id && link.to === hub.id) || (link.to === site.id && link.from === hub.id));
+      if (!linked) errors.push(issue(`sites[${spokeIndex}]`, `${site.name} is assigned to ${hub.name} but no connection exists`, "missing-hub-link"));
+    }
   }
   return { valid: errors.length === 0, errors, warnings };
 }
@@ -633,6 +657,12 @@ export function createLink(values = {}) {
 export function migrateDesign(input, { strict = true } = {}) {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new DesignValidationError("Design must be a JSON object", [issue("design", "Design must be a JSON object", "invalid-design")]);
   if (!Array.isArray(input.sites) || !Array.isArray(input.links)) throw new DesignValidationError("Design must contain sites and links arrays", [issue("design", "Design must contain sites and links arrays", "invalid-design")]);
+  if (input.sites.length > DESIGN_MAX_SITES) {
+    throw new DesignValidationError(`Designs are limited to ${DESIGN_MAX_SITES} sites; this one has ${input.sites.length}.`, [issue("sites", `Designs are limited to ${DESIGN_MAX_SITES} sites; this one has ${input.sites.length}.`, "design-too-large")]);
+  }
+  if (input.links.length > DESIGN_MAX_LINKS) {
+    throw new DesignValidationError(`Designs are limited to ${DESIGN_MAX_LINKS} links; this one has ${input.links.length}.`, [issue("links", `Designs are limited to ${DESIGN_MAX_LINKS} links; this one has ${input.links.length}.`, "design-too-large")]);
+  }
   const inputVersion = Number(input.version || 1), legacyIncomplete = inputVersion <= 1;
   const errors = [];
   if (inputVersion >= SCHEMA_VERSION && input.schema !== SCHEMA_ID) errors.push(issue("schema", `Design schema must be ${SCHEMA_ID}`, "invalid-schema"));
@@ -694,8 +724,8 @@ export function createDesign(values = {}) {
 
 /*
  * Heuristic design review. Input is a canonical (migrated) design; output is
- * presentation-free findings so the workspace UI, the REST API and the MCP
- * tools all report exactly the same issues from one implementation.
+ * presentation-free findings so the workspace review, report and score all
+ * report exactly the same issues from one implementation.
  */
 function reviewIssue(severity, title, message, siteId) {
   const item = { severity, title, message };
@@ -828,8 +858,8 @@ export function defaultFlowPolicy(source, destination) {
  * Recommendation engine. Given what already exists (occupied ranges, VLAN ID
  * conventions) it produces a compatible site or VLAN plan. Plans carry no
  * object identities: callers assign ids when merging a plan into a design.
- * The workspace recommendation dialog and the machine surfaces both run this
- * one implementation, so they cannot drift into different advice.
+ * The workspace recommendation dialog runs this implementation, so preview
+ * and apply cannot drift into different advice.
  */
 export const ROLE_DEFAULTS = Object.freeze({
   users: { name: "Staff", vid: 10 }, voice: { name: "Voice", vid: 20 }, guest: { name: "Guest", vid: 30 },
@@ -963,11 +993,9 @@ export function recommendVlanPlan({ sites = [], siteId, role = "other", devices 
 }
 
 /*
- * The canonical example design. It is both the workspace's "explore a
- * complete example" starting point and the machine surfaces' bootstrap
- * document, so the documented example can never drift from what
- * validate/review/route actually accept. Entity ids are stable so examples
- * can reference them; callers assign their own projectId.
+ * The canonical example design used by the workspace "explore a complete
+ * example" starting point. Entity ids are stable so tests can reference
+ * them; callers assign their own projectId.
  */
 export function exampleDesign() {
   const vlansFor = (siteCidr, specs) => specs.map(spec => {

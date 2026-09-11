@@ -1,4 +1,9 @@
-# Network Planner Studio product review
+# Network Planner Studio product review (historical)
+
+> Archived snapshot of a 2026-08-14 product review of an earlier build
+> (HEAD `8dc94f5`). It is **not** a description of the current product.
+> See [README.md](../../README.md) and [ARCHITECTURE.md](../../ARCHITECTURE.md)
+> for current behaviour.
 
 Review date: 2026-08-14 (Europe/Dublin)
 

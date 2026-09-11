@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   recommendSitePlan,recommendVlanPlan,exampleDesign,
   parseCidr,rangesOverlap,contains,endpointCapacity,prefixForDevices,nextSubnet,
-  suggestSiteRange,isPrivateCidr,isPrivateRoutePrefix,shortestPath,migrateDesign,defaultDhcpPool,validHostInSubnet,parseRoutePrefix,validateGateway,validateDhcpPool,validateDesign,guardCsvCell,unguardCsvCell,parseCsvRows,intToIp,firstUsable,SCHEMA_ID,SCHEMA_VERSION
+  suggestSiteRange,isPrivateCidr,isPrivateRoutePrefix,shortestPath,migrateDesign,defaultDhcpPool,validHostInSubnet,parseRoutePrefix,validateGateway,validateDhcpPool,validateDesign,guardCsvCell,unguardCsvCell,parseCsvRows,intToIp,firstUsable,SCHEMA_ID,SCHEMA_VERSION,DESIGN_MAX_SITES,DESIGN_MAX_LINKS,DesignValidationError
 } from "../public/network-core.js";
 
 test("parses LAN and point-to-point IPv4 networks",()=>{
@@ -312,7 +312,7 @@ test("CSV records reject malformed quote boundaries",()=>{
   assert.throws(()=>parseCsvRows('Name,Notes\nCork,"done"tail'),/content after a closing quote/);
 });
 
-/* Recommendation engine: one planning brain shared by the dialog and machines. */
+/* Recommendation engine: one planning brain shared by the dialog and tests. */
 
 // A valid three-site environment: users mostly ride VID 10, Dublin diverged
 // to 11, management lives on 97, guest on 30.
@@ -448,7 +448,7 @@ test("VLAN planning rejects unknown sites, roles and unallocatable ranges",()=>{
   assert.throws(()=>recommendVlanPlan({sites:[packed],siteId:"packed",role:"other",devices:2}),/fit inside the site range/);
 });
 
-/* The canonical example design: one source for the workspace demo and the machine surfaces. */
+/* The canonical example design: one source for the workspace demo. */
 
 test("the example design is a valid canonical document with stable ids",()=>{
   const example=exampleDesign();
@@ -469,4 +469,84 @@ test("the example design is deterministic apart from its timestamp",()=>{
   const {updatedAt:_a,...rest}=first;
   const {updatedAt:_b,...rest2}=second;
   assert.deepEqual(rest,rest2);
+});
+
+function designShell(overrides={}){
+  return {schema:SCHEMA_ID,version:SCHEMA_VERSION,topologyMode:"custom",policies:{spokeToSpoke:"via-hub"},flowPolicies:{},links:[],sites:[],...overrides};
+}
+function siteRecord(overrides={}){
+  return {id:"hq",name:"HQ",type:"office",cidr:"10.20.0.0/16",devices:10,wan:"single",growth:30,x:20,y:20,topologyRole:"standalone",hubId:null,internetBreakout:"local",vlans:[],...overrides};
+}
+function linkRecord(overrides={}){
+  return {id:"l1",from:"hq",to:"branch",type:"vpn",resilience:"single",routingType:"bgp",transitAllowed:true,defaultRoute:false,advertisedPrefixes:[],notes:"",...overrides};
+}
+
+test("overlapping site ranges are a hard validateDesign error",()=>{
+  const result=validateDesign(designShell({
+    sites:[siteRecord(),siteRecord({id:"branch",name:"Branch",cidr:"10.20.64.0/18"})]
+  }));
+  assert.equal(result.valid,false);
+  const overlap=result.errors.find(error=>error.code==="overlap");
+  assert.ok(overlap,"site overlap must use the same overlap code as VLAN overlap");
+  assert.match(overlap.message,/10\.20\.64\.0\/18 overlaps HQ|10\.20\.0\.0\/16 overlaps Branch/);
+  assert.throws(()=>migrateDesign({
+    schema:SCHEMA_ID,version:SCHEMA_VERSION,topologyMode:"custom",
+    policies:{spokeToSpoke:"via-hub"},flowPolicies:{},
+    sites:[siteRecord(),siteRecord({id:"branch",name:"Branch",cidr:"10.20.64.0/18"})],
+    links:[]
+  },{strict:true}),/overlaps/);
+});
+
+test("hub-and-spoke designs require a valid hub assignment and spoke-to-hub link",()=>{
+  const hub=siteRecord({topologyRole:"hub"});
+  const spoke=siteRecord({id:"branch",name:"Branch",cidr:"10.30.0.0/16",topologyRole:"spoke",hubId:"hq"});
+  const missingLink=validateDesign(designShell({topologyMode:"hub-spoke",sites:[hub,spoke],links:[]}));
+  assert.equal(missingLink.valid,false);
+  assert.ok(missingLink.errors.some(error=>error.code==="missing-hub-link"));
+  assert.match(missingLink.errors.find(error=>error.code==="missing-hub-link").message,/Branch is assigned to HQ/);
+
+  const missingHub=validateDesign(designShell({
+    topologyMode:"hub-spoke",
+    sites:[siteRecord({id:"branch",name:"Branch",cidr:"10.30.0.0/16",topologyRole:"spoke",hubId:null})],
+    links:[]
+  }));
+  assert.ok(missingHub.errors.some(error=>error.code==="missing-hub"));
+  assert.ok(missingHub.errors.some(error=>error.code==="invalid-hub"));
+
+  const invalidSecondary=validateDesign(designShell({
+    topologyMode:"hub-spoke",
+    policies:{spokeToSpoke:"via-hub",secondaryHubId:"gone"},
+    sites:[hub,spoke],
+    links:[linkRecord()]
+  }));
+  assert.ok(invalidSecondary.errors.some(error=>error.code==="invalid-hub"&&error.path==="policies.secondaryHubId"));
+
+  const wired=validateDesign(designShell({
+    topologyMode:"hub-spoke",
+    sites:[hub,spoke],
+    links:[linkRecord()]
+  }));
+  assert.deepEqual(wired.errors,[]);
+});
+
+test("migrateDesign rejects oversized site and link counts before walking the document",()=>{
+  const site=siteRecord({vlans:[]});
+  const manySites=Array.from({length:DESIGN_MAX_SITES+1},(_,i)=>({...site,id:`s${i}`,name:`Site ${i}`,cidr:`10.${(i>>8)&255}.${i&255}.0/24`}));
+  assert.throws(()=>migrateDesign({schema:SCHEMA_ID,version:SCHEMA_VERSION,sites:manySites,links:[]}),error=>{
+    assert.ok(error instanceof DesignValidationError);
+    assert.equal(error.errors[0].code,"design-too-large");
+    assert.match(error.message,new RegExp(`${DESIGN_MAX_SITES} sites`));
+    return true;
+  });
+  const manyLinks=Array.from({length:DESIGN_MAX_LINKS+1},(_,i)=>({id:`l${i}`,from:"hq",to:"branch"}));
+  assert.throws(()=>migrateDesign({
+    schema:SCHEMA_ID,version:SCHEMA_VERSION,
+    sites:[siteRecord(),siteRecord({id:"branch",name:"Branch",cidr:"10.30.0.0/16"})],
+    links:manyLinks
+  }),error=>{
+    assert.ok(error instanceof DesignValidationError);
+    assert.equal(error.errors[0].code,"design-too-large");
+    assert.match(error.message,new RegExp(`${DESIGN_MAX_LINKS} links`));
+    return true;
+  });
 });

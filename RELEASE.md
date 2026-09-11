@@ -7,7 +7,7 @@ release complete until every applicable check passes.
 
 1. Start from a clean working tree.
 2. Install locked dependencies only if they are missing or changed.
-3. Run `npm run check:provenance` and the checks affected by the change. `npm run check:release` is the full gate for broad engine or API changes. Do not repeat passing checks solely for release ceremony.
+3. Run `npm run check:provenance` and the checks affected by the change. `npm run check:release` is the full gate for broad engine or import changes. Do not repeat passing checks solely for release ceremony.
 4. Start the candidate with `npm run dev` when browser validation is needed.
 5. Audit changed markup and links. Use Lighthouse for performance work.
 6. For layout changes, inspect the affected views at 390, 768, and 1440 pixels. Check the browser console
