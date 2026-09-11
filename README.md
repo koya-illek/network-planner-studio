@@ -114,3 +114,9 @@ Wrangler dry run.
 
 [RELEASE.md](RELEASE.md) has acceptance checks and the post-deploy production
 smoke test (`npm run check:production`).
+
+## License
+
+MIT © Koya Illek. See [LICENSE](LICENSE).
+
+Live service: [network.illek.ie](https://network.illek.ie).
