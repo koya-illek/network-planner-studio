@@ -1,10 +1,54 @@
 # Network Planner Studio
 
-An IPv4-only network design workbench for modelling existing environments and
-planning new sites, VLANs and WAN connections.
+**IPv4 network design, made visible.** Drag sites on a live topology canvas
+while addressing, routing and policy are checked in the browser.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the local-first component model,
-data flow, privacy boundary, deployment topology, and external dependencies.
+<p align="center">
+  <a href="https://network.illek.ie/">
+    <img src="public/social-card.png" alt="Network Planner Studio: design IPv4 networks with confidence — addressing, VLANs, sites, policy and topology" width="100%">
+  </a>
+</p>
+
+Map existing ranges or plan a new site, VLAN and WAN layout. The canvas is the
+primary surface: nodes, links and animated traces stay in view, and precise
+CIDRs remain in the address-plan tables. Designs are private and local by
+default — Cloudflare serves the app; nothing is posted to a planning API.
+
+Live at [network.illek.ie](https://network.illek.ie).
+
+## How a design flows
+
+The topology canvas, planner logic and exports share one canonical model
+(`network-planner-studio/design` v3). Edits on the canvas and in the forms go
+through the same factories and validators that accept or reject imports.
+
+```mermaid
+flowchart LR
+  User[Network planner]
+  Worker[Cloudflare Worker<br/>static app and /api/health]
+
+  subgraph Browser["Browser — designs stay on the device"]
+    Canvas[Topology canvas]
+    Core[Planner logic]
+    Store[(localStorage)]
+    Export[JSON, CSV, print report]
+  end
+
+  User -->|opens the workbench| Worker --> Canvas
+  Canvas <-->|render, drag, trace| Core
+  Core -->|validate and serialize| Export
+  Export -->|download or print| User
+  Canvas <--> Store
+```
+
+![Topology canvas through sites, VLANs and WAN validation to JSON, CSV and a print-ready report](docs/assets/network-planner-architecture.png)
+
+Cloudflare receives normal web-request metadata for assets and health checks.
+Site names, IP ranges, policies and notes never leave the browser unless the
+user exports a file.
+
+Component boundaries, IPv4 rules, privacy, failure handling and accessibility
+are in **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 
 ## Product principles
 
@@ -16,64 +60,57 @@ data flow, privacy boundary, deployment topology, and external dependencies.
 
 ## Features
 
-- Existing-network and new-network entry flows
-- Draggable multi-site topology canvas
-- Site-tree search plus collapsed overview for large imported designs
-- Existing or automatically recommended site and VLAN ranges
-- VLAN role, capacity and gateway planning
-- VPN, private WAN, peering and internet connections
-- Explicit hub, spoke and standalone topology roles
-- Hub-and-spoke policy wizard with radial auto-layout
-- Multi-hop animated route tracing through transit hubs
-- Static or BGP routing intent, advertised prefixes and default routes
-- Connection notes preserved in the planner and implementation report
-- Address overlap, containment and capacity validation
-- Single-WAN, segmentation and management-network design guidance
-- Editable gateways, gateway-aware capacity, DHCP reservations and `/31` transit networks
-- Explicit DHCP pool start/end planning with gateway exclusion checks
-- Editable sites, VLANs and connections with undo/redo
-- Trust-zone traffic policy matrix
-- Design assumptions and implementation notes
-- Local persistence and JSON import/export
-- Multiple local projects with duplicate, open and delete workflows
-- Print-ready implementation report for PDF handoff
-- Versioned JSON migration plus RFC 4180 CSV address-plan import/export
-- Zoom, pan, pinch, fit-to-screen, undoable keyboard nudges, drag-cancel snap-back and a mobile site drawer
-- Responsive desktop and mobile layouts
+**Canvas.** Draggable multi-site topology with zoom, pan, pinch, fit-to-screen,
+undoable keyboard nudges and a mobile site drawer. Site-tree search and a
+collapsed overview for large imports. Hub-and-spoke wizard with radial
+auto-layout. Animated multi-hop route tracing through transit hubs.
 
-## Run locally
+**Addressing and WAN.** Existing-network and new-network entry. VLAN roles,
+capacity, editable gateways, DHCP pools and reservations, including `/31`
+transit. VPN, private WAN, peering and internet links with hub, spoke or
+standalone roles. Static or BGP routing intent, advertised prefixes and
+default routes.
+
+**Review.** Overlap, containment and capacity validation. Single-WAN,
+segmentation and management-network guidance. Trust-zone traffic policy
+matrix. Design assumptions and implementation notes.
+
+**Handoff.** Local projects with duplicate, open and delete. Undo/redo.
+Versioned JSON plus RFC 4180 CSV. Print-ready implementation report for PDF.
+
+## Quickstart
+
+### Run
 
 ```sh
 npm install
 npm run dev
 ```
 
-Run both the networking unit tests and browser workflows:
+Open [http://127.0.0.1:8787](http://127.0.0.1:8787). The health endpoint is
+`/api/health`. Designs stay in the browser.
+
+### Test
 
 ```sh
 npm test
 npm run test:e2e
 ```
 
-The health endpoint is available at `/api/health`. Designs stay in the
-browser; there is no public planning API.
+`npm test` covers schema and network calculations. `npm run test:e2e` covers
+browser workflows.
 
-Before a release, run the complete local gate:
+### Deploy
 
 ```sh
 npm run check:release
-```
-
-The gate checks package, lockfile, health, and schema provenance. It then runs
-the unit suite, browser suite, dependency audit, and Wrangler dry run.
-
-## Deploy
-
-Follow [RELEASE.md](RELEASE.md) for the acceptance checks and post-deployment
-production smoke test.
-
-```sh
 npm run deploy
 ```
 
-The Worker serves static assets directly and uses no database or paid binding.
+The Worker serves `public/` as static assets and uses no database or paid
+binding. The release gate checks package, lockfile, health and schema
+provenance, then runs the unit suite, browser suite, dependency audit and a
+Wrangler dry run.
+
+[RELEASE.md](RELEASE.md) has acceptance checks and the post-deploy production
+smoke test (`npm run check:production`).
