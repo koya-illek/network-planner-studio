@@ -1,8 +1,6 @@
 import packageMetadata from "./package.json" with { type: "json" };
 import { SECURITY_HEADERS } from "./headers.js";
 import { SCHEMA_ID, SCHEMA_VERSION } from "./public/network-core.js";
-import { handleApiRequest } from "./api.js";
-import { handleMcpRequest } from "./mcp.js";
 
 export default {
   async fetch(request, env) {
@@ -12,11 +10,6 @@ export default {
     const redirect = redirectForRequest(request);
     if (redirect) return redirect;
 
-    // Machine surfaces: versioned REST planning API and the MCP tool server.
-    // Both are stateless compute over the canonical core model.
-    if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) return handleMcpRequest(request);
-    if (url.pathname === "/api/v1" || url.pathname.startsWith("/api/v1/")) return handleApiRequest(request);
-
     if (url.pathname === "/api/health") {
       const headers = new Headers(SECURITY_HEADERS);
       headers.set("X-Robots-Tag", "noindex, nofollow");
@@ -25,10 +18,7 @@ export default {
       headers.set("Cache-Control", "no-store");
       if (request.method === "OPTIONS") return new Response(null, { status: 204, headers });
       if (!["GET", "HEAD"].includes(request.method)) return Response.json({ ok: false, error: "method_not_allowed" }, { status: 405, headers });
-      // Health doubles as the machine-surface directory: clients discover the
-      // API version and MCP endpoint from the same liveness probe. Schema
-      // identity comes from the core model, never a second copy.
-      const body = JSON.stringify({ ok: true, service: packageMetadata.name, version: packageMetadata.version, schema: SCHEMA_ID, schemaVersion: SCHEMA_VERSION, api: "v1", mcp: "/mcp" });
+      const body = JSON.stringify({ ok: true, service: packageMetadata.name, version: packageMetadata.version, schema: SCHEMA_ID, schemaVersion: SCHEMA_VERSION });
       headers.set("Content-Type", "application/json; charset=utf-8");
       return new Response(request.method === "HEAD" ? null : body, { status: 200, headers });
     }

@@ -6,9 +6,9 @@ Mobile view tabs use short labels, retain their complete accessible names,
 and scroll horizontally without wrapping. Activating a view keeps its tab
 visible, including keyboard navigation to the final report.
 
-Last reviewed: 2026-08-23 (round 4)
+Last reviewed: 2026-09-11
 
-Network Planner Studio is a local-first IPv4 design workbench. Cloudflare serves the application, while network designs, calculations, history, and exports remain in the user's browser unless the user deliberately downloads or imports a file. A stateless machine surface (`/api/v1`, `/mcp`) exposes the same planning engine to scripts and AI agents; submitted documents are computed and discarded, never stored.
+Network Planner Studio is a local-first IPv4 design workbench. Cloudflare serves the application, while network designs, calculations, history, and exports remain in the user's browser unless the user deliberately downloads or imports a file. There is no public planning API or MCP surface.
 
 ![Network Planner Studio architecture infographic](docs/assets/network-planner-architecture.png)
 
@@ -21,7 +21,7 @@ The workbench models existing and planned network environments through:
 - sites, parent address ranges, VLANs, roles, gateways, capacities, DHCP pools, and reservations
 - hub, spoke, standalone, VPN, private-WAN, peering, and internet connections
 - static and BGP routing intent, advertised prefixes, default routes, and breakout
-- overlap, containment, gateway, broadcast, capacity, pool, reservation, enum, and identifier validation
+- overlap, containment, gateway, broadcast, capacity, pool, reservation, enum, identifier, and hub-and-spoke wiring validation
 - trust-zone traffic policies and implementation assumptions
 - animated multi-hop route tracing through transit hubs
 - recommendation workflows (`recommendSitePlan`, `recommendVlanPlan` in the core model) producing identity-free plans through the same factories as manual entry
@@ -40,36 +40,29 @@ flowchart LR
     Storage[(Browser localStorage)]
     Export[JSON, CSV, and print report]
     User[Network planner or MSP engineer]
-    Agent[Scripts and AI agents via REST/MCP]
 
     User --> Edge --> Browser
     Browser --> UI --> Core
     Core --> UI
     Browser <--> Storage
     Browser --> Export --> User
-    Agent --> Edge
-    Edge --> Core
 ```
 
-No project-data arrow returns to Cloudflare from normal browser use because designs are processed and stored locally. Agents that call the machine surface deliberately submit a document for computation, mirroring the export/import boundary; nothing they send is persisted.
+No project-data arrow returns to Cloudflare. Designs are processed and stored locally.
 
 ## Runtime components
 
 | Component | Responsibility | Primary source |
 | --- | --- | --- |
-| Cloudflare Worker | Serves static assets with security and cross-origin isolation headers, canonical-host redirects, a branded 404 page, a small health endpoint, and the machine surfaces | `worker.js` |
-| Shared hardening | Single source of the response security set plus machine-response additions (no-store, noindex, CORS) | `headers.js` |
-| REST planning API | Versioned stateless endpoints: validate, review, route, site/VLAN planning, subnet allocation, OpenAPI description, standalone JSON Schema of the design model, and the canonical example design | `api.js` |
-| MCP tool server | Streamable-HTTP (stateless JSON mode) tools mirroring the REST operations for AI agents | `mcp.js` |
+| Cloudflare Worker | Serves static assets with security and cross-origin isolation headers, canonical-host redirects, a branded 404 page, and a small health endpoint | `worker.js` |
+| Shared hardening | Single source of the response security set | `headers.js` |
 | Browser shell | Manages project workflows, forms, topology interaction, persistence, import, export, report rendering, and accessibility state | `public/app.js` |
 | Network core | Owns schema v3, normalization, validation, IPv4 and CIDR math, allocation, topology, routing, trace, migration, CSV, review heuristics, and report data | `public/network-core.js` |
 | Static UI | Defines the application structure and styling | `public/index.html`, `public/styles.css` |
 | Local project store | Persists serialized versioned projects in browser storage | Browser `localStorage` |
 | Export boundary | Produces JSON, CSV, and print-ready HTML for user-controlled download or PDF printing | Browser application |
 
-The browser UI and both machine surfaces call the same core functions, so a
-design reviews identically whether it is inspected in the workspace or through
-`/api/v1/review`.
+The browser UI calls the core functions directly, so a design is reviewed with the same engine that validates imports.
 
 ## Canonical data model
 
@@ -88,13 +81,13 @@ Every entry path uses shared factories and validators. Manual forms, recommendat
 1. The browser loads the static application from Cloudflare.
 2. The user opens or creates a project stored in local browser storage.
 3. Sites, VLANs, links, routes, policies, and assumptions pass through the canonical schema factories.
-4. Hard validation rejects malformed CIDRs, duplicates, invalid enums, dangling links, non-contained ranges, unsafe gateways, pool conflicts, and invalid reservations.
+4. Hard validation rejects malformed CIDRs, duplicates, invalid enums, dangling links, overlapping site or VLAN ranges, non-contained ranges, unsafe gateways, pool conflicts, invalid reservations, and hub-and-spoke wiring faults (missing hub, invalid spoke or secondary hub assignment, missing spoke↔hub link).
 5. Design guidance evaluates topology and operational intent separately from hard validity.
 6. The topology canvas renders the normalized model. Route tracing runs shortest-path and routing-intent calculations locally. Canvas layout is measured while the view is visible; edits made from other tabs defer the layout and it is flushed when Topology is opened again.
 7. Rendering scales with interaction, not document size: hidden tabs (address plan, review, policy, report) are built when activated and invalidated by edits; entity selection repaints classes and the inspector without rebuilding rows; node drags and keyboard nudges move one node and its incident links. Large imported designs collapse the site tree to site rows with a search filter that spans names, ranges, types, roles and VLANs.
 8. Undo and redo preserve local editing history.
 9. Export serializes the same canonical model to versioned JSON, expanded CSV, or a print-ready implementation report. Printing always flushes a stale report first.
-10. Import validates and either accepts, migrates with warnings, or visibly rejects invalid source data.
+10. Import validates and either accepts, migrates with warnings, or visibly rejects invalid source data. JSON and CSV imports are limited to 10 MB, 500 sites, and 2000 links.
 
 ## IPv4 rules
 
@@ -107,24 +100,25 @@ Every entry path uses shared factories and validators. Manual forms, recommendat
 - Duplicate IDs and duplicate VLAN IDs inside one site are rejected.
 - Editing a VLAN or link preserves its stable object ID. Automatic VLAN-ID selection searches the full valid range and reports exhaustion instead of returning an occupied ID.
 - Existing address space is preserved unless the user deliberately changes it.
+- Site parent ranges that overlap are a hard error, matching VLAN subnet overlap.
 
 ## Third-party services and dependencies
 
 | Service or platform | Use | Project data sent | Required |
 | --- | --- | --- | --- |
-| Cloudflare Workers | Serves the application, redirects aliases, exposes `/api/health`, computes stateless planning requests for `/api/v1` and `/mcp`, and provides server-side request observability | No project payload is submitted by normal browser use; machine-surface callers deliberately submit designs that are never stored | Yes for hosted use |
+| Cloudflare Workers | Serves the application, redirects aliases, exposes `/api/health`, and provides server-side request observability | No project payload | Yes for hosted use |
 | Cloudflare Workers Assets | Serves HTML, CSS, JavaScript, icons, robots, and sitemap | No project data | Yes for hosted use |
 | Browser `localStorage` | Stores projects on the user's device. The current design and a 20-project library (most recently updated, current project always kept) are written through debounced saves; undo history is capped at 40 in-memory snapshots | Data stays in that browser profile | Optional persistence |
 | Browser print and download APIs | Produces user-controlled files and PDF handoff | Data leaves only through user-directed export | Optional |
 
-There is no runtime database, analytics service, authentication provider, cloud project sync, live network discovery, vendor controller, or RMM integration. The stateless machine surfaces (`/api/v1`, `/mcp`) are described above.
+There is no runtime database, analytics service, authentication provider, cloud project sync, live network discovery, vendor controller, RMM integration, public planning API, or MCP server.
 
 ## Privacy and trust boundary
 
 - Designs are private and local by default.
 - Cloudflare receives normal web request metadata for application assets and health checks.
-- Site names, IP ranges, policies, assumptions, and implementation notes are not sent to an application backend during normal planning.
-- Imports are untrusted input and are schema-validated before use. JSON and CSV imports above 10 MB are rejected before parsing. Machine-surface bodies are JSON-only, capped at 1 MiB, and parsed through the same canonical migration as imports.
+- Site names, IP ranges, policies, assumptions, and implementation notes are not sent to an application backend during planning.
+- Imports are untrusted input and are schema-validated before use. JSON and CSV imports above 10 MB, 500 sites, or 2000 links are rejected before the document is walked.
 - Dynamic values are escaped or enum-constrained before rendering.
 - Storage failure is reported to the user rather than silently discarding changes. An unreadable stored blob is quarantined under a `.unreadable` key before any later save can overwrite it.
 - The pending debounced save flushes on `pagehide` and when the tab is backgrounded, so mobile cannot park unsaved edits indefinitely.
@@ -139,18 +133,12 @@ The product is intentionally browser-first.
 | Interface | Purpose |
 | --- | --- |
 | `/` | Complete planning application |
-| `GET`, `HEAD`, or `OPTIONS /api/health` | Service, schema and release liveness plus machine-surface locations (`api`, `mcp`) |
-| `/api/v1/*` | Versioned stateless REST computations (validate, review, route, allocation) with an OpenAPI description and a standalone JSON Schema of the canonical document — see [docs/api.md](docs/api.md) |
-| `/mcp` | MCP tool server exposing the same operations to AI agents |
+| `GET`, `HEAD`, or `OPTIONS /api/health` | Service, schema and release liveness |
 | JSON import and export | Lossless versioned design exchange |
 | CSV import and export | Address-plan and topology exchange |
 | Print report | Human implementation handoff and PDF generation |
 
-The machine surfaces are stateless compute: a caller deliberately submits a
-design document, the worker computes over it through the canonical core, and
-the document is discarded with the response. There is no storage binding, no
-account system and no project sync; the local-first boundary for normal
-planning is unchanged.
+There is no storage binding, no account system, and no project sync. `/api/health` is a liveness probe only; it does not accept design documents.
 
 ## Deployment topology
 
@@ -178,15 +166,14 @@ One Cloudflare Worker serves `network.illek.ie` and the compatibility hostname `
 
 Address capacities and DHCP pools use generic IPv4 rules. The hosted-network example deliberately names no cloud provider. Provider reservations and managed DHCP rules require separate validation and are disclosed in the address plan and exported implementation report. Route tracing and traffic policies express design intent, not deployed reachability or enforcement.
 
-The current product does not support IPv6, VRF, live discovery, controller login, configuration generation, configuration pushing, cloud collaboration, tenant accounts, or vendor-specific deployment validation.
+The current product does not support IPv6, VRF, live discovery, controller login, configuration generation, configuration pushing, cloud collaboration, tenant accounts, vendor-specific deployment validation, or a public machine API.
 
 ## Verification map
 
-Network calculations, import/export behaviour, API boundaries, and interactive regressions remain covered. Source-text tests for CSS and function wiring have been removed. Select the affected browser path instead of repeating the complete release suite after small changes.
+Network calculations, import/export behaviour, and interactive regressions remain covered. Source-text tests for CSS and function wiring have been removed. Select the affected browser path instead of repeating the complete release suite after small changes.
 
 - Core schema and network tests: `npm test`
-- REST and MCP surface tests: `test/api.test.js`, `test/mcp.test.js`, `tests/api.spec.js`
 - Browser workflow and accessibility tests: `npm run test:e2e`
-- Worker, machine surfaces and static source: `worker.js`, `api.js`, `mcp.js`, `headers.js`, `public/`
+- Worker and static source: `worker.js`, `headers.js`, `public/`
 - Canonical model and calculations: `public/network-core.js`
 - Browser orchestration: `public/app.js`

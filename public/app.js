@@ -1,4 +1,4 @@
-import {SCHEMA_ID,SCHEMA_VERSION,ENUMS,DesignValidationError,exampleDesign,parseCidr,parseRoutePrefix,rangesOverlap,contains,firstUsable,endpointCapacity,defaultDhcpPool,validateGateway,validateDhcpPool,prefixForDevices,nextSubnet,nextAvailableVlanId,suggestSiteRange as suggestSiteRangeCore,recommendSitePlan as recommendSitePlanCore,recommendVlanPlan as recommendVlanPlanCore,reviewDesignIssues,designScore,defaultFlowPolicy,guardCsvCell,unguardCsvCell,parseCsvRows,shortestPath,migrateDesign,createSite,createVlan,createLink} from "./network-core.js";
+import {SCHEMA_ID,SCHEMA_VERSION,ENUMS,DESIGN_MAX_SITES,DesignValidationError,exampleDesign,parseCidr,parseRoutePrefix,rangesOverlap,contains,firstUsable,endpointCapacity,defaultDhcpPool,validateGateway,validateDhcpPool,prefixForDevices,nextSubnet,nextAvailableVlanId,suggestSiteRange as suggestSiteRangeCore,recommendSitePlan as recommendSitePlanCore,recommendVlanPlan as recommendVlanPlanCore,reviewDesignIssues,designScore,defaultFlowPolicy,guardCsvCell,unguardCsvCell,parseCsvRows,shortestPath,migrateDesign,createSite,createVlan,createLink} from "./network-core.js";
 
 const STORAGE_KEY = "network-planner-studio.v1";
 const LIBRARY_KEY = "network-planner-studio.projects.v1";
@@ -44,7 +44,7 @@ function blankState() {
 }
 
 // The example design is built and validated by the core model, so the
-// workspace demo and the machine surfaces share one document.
+// workspace demo cannot drift from the canonical fixture.
 function sampleState(){
   return {...exampleDesign(),projectId:uid()};
 }
@@ -412,8 +412,7 @@ $("#address-filter").addEventListener("keydown",e=>{
 });
 
 let reviewCache=null;
-// The heuristics live in the core model so the API and MCP surfaces report
-// exactly the same findings as this workspace.
+// The heuristics live in the core model so review, report and score stay aligned.
 function reviewDesign(){if(reviewCache)return reviewCache;return reviewCache=reviewDesignIssues(state)}
 function renderReviewBadge(){
   const issues=reviewDesign(),problems=issues.filter(i=>i.severity==="error"||i.severity==="warning").length;
@@ -578,7 +577,7 @@ $("#hub-form").addEventListener("submit",e=>{
   pushHistory();state.topologyMode="hub-spoke";state.policies={...state.policies,spokeToSpoke:fd.get("spokeToSpoke"),centralizedInspection:fd.get("centralizedInspection")==="on",secondaryHubId};
   const hubIds=[hubId,secondaryHubId].filter(Boolean);
   for(const site of state.sites){site.topologyRole=hubIds.includes(site.id)?"hub":"spoke";site.hubId=hubIds.includes(site.id)?null:hubId;site.internetBreakout=hubIds.includes(site.id)?"local":fd.get("internetBreakout")}
-  if(fd.get("createLinks")==="on")for(const spoke of state.sites.filter(s=>!hubIds.includes(s.id)))for(const targetHub of [hub,secondary].filter(Boolean)){
+  for(const spoke of state.sites.filter(s=>!hubIds.includes(s.id)))for(const targetHub of [hub,secondary].filter(Boolean)){
     const existing=state.links.find(l=>(l.from===targetHub.id&&l.to===spoke.id)||(l.to===targetHub.id&&l.from===spoke.id));
     if(existing){existing.transitAllowed=true;if(spoke.internetBreakout==="hub")existing.defaultRoute=true}
     else state.links.push(createLink({id:uid(),from:targetHub.id,to:spoke.id,type:"vpn",resilience:secondary?"dual":"single",routingType:"static",transitAllowed:true,defaultRoute:spoke.internetBreakout==="hub",advertisedPrefixes:[targetHub.cidr,spoke.cidr,...(spoke.internetBreakout==="hub"?["0.0.0.0/0"]:[])]}));
@@ -764,7 +763,10 @@ function designFromCsv(text){
     const siteKey=record["site id"]||record.site||uid();
     if(!record.site&&record["record type"]==="design")continue;
     let site=siteById.get(siteKey);
-    if(!site){const index=sites.length;site={id:siteKey,name:record.site||"Imported site",type:record["site type"]||"office",cidr:record["site range"],devices:Number(record["site devices"]||record.devices||1),wan:record.wan||"single",growth:Number(record.growth||30),topologyRole:record["site role"]||record.role||"standalone",hubId:record["hub id"]||null,internetBreakout:record["internet breakout"]||"local",notes:record["site notes"]||"Imported from CSV",x:12+(index%3)*31,y:18+Math.floor(index/3)*34,vlans:[]};sites.push(site);siteById.set(siteKey,site)}
+    if(!site){
+      if(sites.length>=DESIGN_MAX_SITES)throw new DesignValidationError(`Designs are limited to ${DESIGN_MAX_SITES} sites`,[{path:"sites",message:`Designs are limited to ${DESIGN_MAX_SITES} sites`,code:"design-too-large"}]);
+      const index=sites.length;site={id:siteKey,name:record.site||"Imported site",type:record["site type"]||"office",cidr:record["site range"],devices:Number(record["site devices"]||record.devices||1),wan:record.wan||"single",growth:Number(record.growth||30),topologyRole:record["site role"]||record.role||"standalone",hubId:record["hub id"]||null,internetBreakout:record["internet breakout"]||"local",notes:record["site notes"]||"Imported from CSV",x:12+(index%3)*31,y:18+Math.floor(index/3)*34,vlans:[]};sites.push(site);siteById.set(siteKey,site)
+    }
     if(!headers.includes("record type")||record["record type"]==="vlan"||record.subnet){const vlanObjectId=record["vlan id"],vlanId=record.vlan||vlanObjectId;if(!vlanId)continue;const cidr=parseCidr(record.subnet).cidr,devices=Math.max(1,Number(record.devices||1)),reserved=Math.max(1,Number(record.reserved||1)),dhcpEnabled=String(record.dhcp||"enabled").toLowerCase()!=="disabled",gateway=record.gateway||firstUsable(cidr),automatic=defaultDhcpPool(cidr,reserved,{gateway}),start=dhcpEnabled?(record["dhcp start"]||automatic.start):"",end=dhcpEnabled?(record["dhcp end"]||automatic.end):"";site.vlans.push(createVlan({id:vlanObjectId&&/^[A-Za-z0-9_-]{1,80}$/.test(vlanObjectId)?vlanObjectId:uid(),name:record["vlan name"]||record.purpose||`VLAN ${vlanId}`,vid:Number(vlanId),role:record.purpose||"other",devices,cidr,gateway,dhcpEnabled,reserved,dhcpStart:start,dhcpEnd:end,notes:record["vlan notes"]||"",siteCidr:site.cidr}));}
   }
   const raw={schema:SCHEMA_ID,version:SCHEMA_VERSION,projectId:metadata?.["project id"]||uid(),name:metadata?.["project name"]||"Imported address plan",mode:"imported",topologyMode:metadata?.["topology mode"]||"custom",policies:metadata?.policies||{spokeToSpoke:"via-hub",centralizedInspection:false,secondaryHubId:null},flowPolicies:metadata?.["flow policies"]||{},assumptions:metadata?.assumptions||["Imported from CSV; confirm site types, WAN design and routing."],sites,links:metadata?.links||[]};
