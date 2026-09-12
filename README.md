@@ -1,22 +1,21 @@
 # Network Planner Studio
 
-An Illek project.
+Plan IPv4 networks visually. Map offices, VLANs and WAN links, check address
+ranges, and export a plan you can use during implementation.
 
-**IPv4 network design, made visible.** Drag sites on a live topology canvas
-while addressing, routing and policy are checked in the browser.
+[Open Network Planner Studio](https://network.illek.ie) · [More Illek tools](https://tools.illek.ie)
 
-<p align="center">
-  <a href="https://network.illek.ie/">
-    <img src="public/social-card.png" alt="Network Planner Studio: design IPv4 networks with confidence — addressing, VLANs, sites, policy and topology" width="100%">
-  </a>
-</p>
+![Network Planner Studio showing its built-in three-site example with VLANs and VPN links](docs/assets/product-screenshot.png)
 
-Map existing ranges or plan a new site, VLAN and WAN layout. The canvas is the
-primary surface: nodes, links and animated traces stay in view, and precise
-CIDRs remain in the address-plan tables. Designs are private and local by
-default — Cloudflare serves the app; nothing is posted to a planning API.
+*Live interface captured on 12 September 2026 using the built-in example network.*
 
-Live at [network.illek.ie](https://network.illek.ie).
+## Try it
+
+Open the app and choose **Or explore a complete example**. Follow the links
+between Cork HQ, Dublin office and the hosted network, then open **Address plan**
+or **Review** to inspect the ranges and design guidance.
+
+Designs stay in your browser unless you export a file. No account is required.
 
 ## How a design flows
 
@@ -116,6 +115,12 @@ Wrangler dry run.
 
 [RELEASE.md](RELEASE.md) has acceptance checks and the post-deploy production
 smoke test (`npm run check:production`).
+
+## Feedback and contributions
+
+Found a problem? [Report a bug](https://github.com/koya-illek/network-planner-studio/issues/new?template=bug_report.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for fixes and feature proposals, or
+[SECURITY.md](SECURITY.md) to report a vulnerability.
 
 ## License
 
