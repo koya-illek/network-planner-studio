@@ -47,12 +47,13 @@ test("editing a VLAN can be undone and redone", async ({ page }) => {
 
 test("editing a connection keeps its stable ID", async ({ page }) => {
   const originalId=await page.locator(".link-hit").first().getAttribute("data-link");
+  const originalNotes=await page.evaluate(()=>JSON.parse(localStorage.getItem("network-planner-studio.v1")).links[0].notes);
   await page.locator(".link-hit").first().focus();
   await page.keyboard.press("Enter");
   await page.locator("[data-edit-link]").click();
-  await page.locator("#connect-form select[name=resilience]").selectOption("single");
+  await page.locator("#connect-form select[name=resilience]").selectOption("dual");
   await page.locator("#connect-form button[type=submit]").click();
-  await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem("network-planner-studio.v1")).links[0])).toMatchObject({id:originalId,notes:"Primary branch path."});
+  await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem("network-planner-studio.v1")).links[0])).toMatchObject({id:originalId,resilience:"dual",notes:originalNotes});
 });
 
 test("a failed VLAN edit cannot turn into an accidental site move", async ({ page }) => {
@@ -563,9 +564,9 @@ test("canvas nodes and links announce health and resilience in words", async ({ 
   await expect(page.locator(".topology-node .health-flag.warning").first()).toHaveText("Risks");
   const flagged = await page.locator('.topology-node[aria-label*="risks to review"]').count();
   expect(flagged).toBeGreaterThan(0);
-  const dualLabel = await page.locator(".link-hit").first().getAttribute("aria-label");
-  expect(dualLabel).toMatch(/redundant paths/);
-  expect(dualLabel).toMatch(/vpn/);
+  const pathLabel = await page.locator(".link-hit").first().getAttribute("aria-label");
+  expect(pathLabel).toMatch(/single path/);
+  expect(pathLabel).toMatch(/vpn/);
 });
 
 test("trace progress is a live region", async ({ page }) => {
@@ -770,4 +771,15 @@ test("the CSV export stays complete while the table is filtered", async ({ page 
   const download = await downloadPromise;
   const csv = await (await import("node:fs/promises")).readFile(await download.path(), "utf8");
   expect(csv.match(/"vlan"/g).length).toBe(9);
+});
+
+
+test("example report distinguishes logical link paths from site WAN resilience", async ({ page }) => {
+  await page.locator('[data-view="report"]').click();
+  const report = page.locator("#implementation-report");
+  await expect(report).toContainText("not verified circuit independence");
+  const branchLink = report.locator("tr").filter({hasText: "Cork HQ to Dublin office"});
+  await expect(branchLink).toContainText("Single path");
+  await expect(branchLink).toContainText("Dublin has one WAN circuit");
+  await expect(report).toContainText("Dublin office has inter-site connectivity but only one WAN path");
 });

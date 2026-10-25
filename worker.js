@@ -18,7 +18,16 @@ export default {
       headers.set("Cache-Control", "no-store");
       if (request.method === "OPTIONS") return new Response(null, { status: 204, headers });
       if (!["GET", "HEAD"].includes(request.method)) return Response.json({ ok: false, error: "method_not_allowed" }, { status: 405, headers });
-      const body = JSON.stringify({ ok: true, service: packageMetadata.name, version: packageMetadata.version, schema: SCHEMA_ID, schemaVersion: SCHEMA_VERSION });
+      const body = JSON.stringify({
+        ok: true,
+        service: packageMetadata.name,
+        version: packageMetadata.version,
+        schema: SCHEMA_ID,
+        schemaVersion: SCHEMA_VERSION,
+        sourceRevision: typeof env?.SOURCE_REVISION === "string" && env.SOURCE_REVISION.trim() ? env.SOURCE_REVISION.trim() : "unknown",
+        deploymentId: typeof env?.VERSION_METADATA?.id === "string" && env.VERSION_METADATA.id.trim() ? env.VERSION_METADATA.id.trim() : "unknown",
+        checks: { scope: "process-liveness", assetRead: "not-checked", planValidation: "not-checked" }
+      });
       headers.set("Content-Type", "application/json; charset=utf-8");
       return new Response(request.method === "HEAD" ? null : body, { status: 200, headers });
     }

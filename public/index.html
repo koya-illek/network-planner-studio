@@ -239,7 +239,7 @@
         <label>From<select name="from" required></select></label>
         <label>To<select name="to" required></select></label>
         <label>Connection<select name="type"><option value="vpn">Site-to-site VPN</option><option value="private">Private WAN</option><option value="peering">Cloud peering</option><option value="internet">Internet</option></select></label>
-        <label>Resilience<select name="resilience"><option value="single">Single path</option><option value="dual">Dual / redundant</option></select></label>
+        <label>Link paths<select name="resilience"><option value="single">Single path</option><option value="dual">Dual logical paths</option></select><small>Independent WAN circuits must be verified separately.</small></label>
         <label>Routing<select name="routingType"><option value="static">Static routes</option><option value="bgp">Dynamic / BGP</option></select></label>
         <label>Transit<select name="transitAllowed"><option value="true">Allow transit</option><option value="false">Endpoint only</option></select></label>
         <label class="wide check-label"><input name="defaultRoute" type="checkbox"> Advertise a default route over this connection</label>
