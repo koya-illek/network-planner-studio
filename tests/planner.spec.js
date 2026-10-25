@@ -783,3 +783,54 @@ test("example report distinguishes logical link paths from site WAN resilience",
   await expect(branchLink).toContainText("Dublin has one WAN circuit");
   await expect(report).toContainText("Dublin office has inter-site connectivity but only one WAN path");
 });
+
+test("opening Projects preserves libraries larger than twenty designs", async ({page}) => {
+  await page.evaluate(() => {
+    const current=JSON.parse(localStorage.getItem('network-planner-studio.v1'));
+    const library=Object.fromEntries(Array.from({length:25},(_,i)=>['saved-'+i,{...current,projectId:'saved-'+i,name:'Saved '+i}]));
+    localStorage.setItem('network-planner-studio.projects.v1',JSON.stringify(library));
+  });
+  await page.locator('#utility-menu summary').click();
+  await page.getByRole('button',{name:'Projects',exact:true}).click();
+  expect(await page.evaluate(()=>Object.keys(JSON.parse(localStorage.getItem('network-planner-studio.projects.v1'))).length)).toBe(26);
+});
+
+test("CSV round-trip preserves identity, WAN links and design policy", async ({page})=>{
+  const before=await page.evaluate(()=>JSON.parse(localStorage.getItem('network-planner-studio.v1')));
+  await page.locator('[data-view=addressing]').click();
+  const pending=page.waitForEvent('download');
+  await page.locator('#csv-export').click();
+  const csv=await (await import('node:fs/promises')).readFile(await (await pending).path(),'utf8');
+  await page.locator('#file-input').setInputFiles({name:'roundtrip.csv',mimeType:'text/csv',buffer:Buffer.from(csv)});
+  await expect(page.locator('#toast')).toContainText('CSV imported and validated');
+  const after=await page.evaluate(()=>JSON.parse(localStorage.getItem('network-planner-studio.v1')));
+  for(const field of ['projectId','name','mode','topologyMode','policies','flowPolicies','assumptions','links','sites'])expect(after[field]).toEqual(before[field]);
+});
+
+test("cross-tab conflict blocks autosave and pagehide until saving a copy",async({page})=>{
+  const other=await page.context().newPage();await other.goto('/');
+  await other.locator('#project-name-button').click();
+  await other.locator('#name-form input[name=name]').fill('Other version');
+  await other.locator('#name-form button[type=submit]').click();
+  await expect(page.locator('#storage-conflict')).toBeVisible();
+  await page.locator('#project-name-button').click();
+  await page.locator('#name-form input[name=name]').fill('My version');
+  await page.locator('#name-form button[type=submit]').click();
+  await page.evaluate(()=>window.dispatchEvent(new Event('pagehide')));
+  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('network-planner-studio.v1')).name)).toBe('Other version');
+  await page.getByRole('button',{name:'Save my version as a copy',exact:true}).click();
+  const names=await page.evaluate(()=>Object.values(JSON.parse(localStorage.getItem('network-planner-studio.projects.v1'))).map(p=>p.name));
+  expect(names).toContain('Other version');expect(names).toContain('My version copy');
+  await other.close();
+});
+
+test('complete library backups restore without replacing existing designs',async({page})=>{
+  await page.locator('#utility-menu summary').click();await page.locator('#projects-button').click();
+  const pending=page.waitForEvent('download');await page.getByRole('button',{name:'Back up all designs'}).click();
+  const text=await (await import('node:fs/promises')).readFile(await (await pending).path(),'utf8');
+  const bundle=JSON.parse(text);expect(Object.keys(bundle.projects)).toHaveLength(1);
+  await page.locator('#projects-dialog [data-close-dialog]').click();
+  await page.locator('#file-input').setInputFiles({name:'library.json',mimeType:'application/json',buffer:Buffer.from(text)});
+  await expect(page.locator('#toast')).toContainText('1 designs restored; existing designs kept');
+  expect(await page.evaluate(()=>Object.keys(JSON.parse(localStorage.getItem('network-planner-studio.projects.v1'))).length)).toBe(2);
+});

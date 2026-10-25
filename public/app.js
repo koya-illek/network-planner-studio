@@ -2,8 +2,8 @@ import {SCHEMA_ID,SCHEMA_VERSION,ENUMS,DESIGN_MAX_SITES,DesignValidationError,ex
 
 const STORAGE_KEY = "network-planner-studio.v1";
 const LIBRARY_KEY = "network-planner-studio.projects.v1";
-const LIBRARY_LIMIT = 20;
 const IMPORT_MAX_BYTES = 10 * 1024 * 1024;
+const LIBRARY_IMPORT_MAX_BYTES = 64 * 1024 * 1024;
 const prefersReducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 const TYPE_ICONS = {office:"OF",branch:"BR",datacentre:"DC",cloud:"CL",warehouse:"WH"};
 const INSPECTOR_CLOSE = `<button class="button ghost inspector-close" data-inspector-close type="button" aria-label="Close inspector">×</button>`;
@@ -21,6 +21,7 @@ function storageSet(key, value) {
   catch { storageIssue = "Browser storage is full or unavailable. Export a recovery copy before continuing."; return false; }
 }
 let state = loadState() || blankState();
+let conflictProjectId = null;
 let selected = null;
 let currentTool = "select";
 let drag = null;
@@ -59,12 +60,35 @@ function quarantineStorage(key){
 }
 function loadState(){try{const value=JSON.parse(storageGet(STORAGE_KEY));return value?migrateDesign(value,{strict:false}):null}catch(error){quarantineStorage(STORAGE_KEY);storageIssue="The saved design could not be read. The raw copy was kept under network-planner-studio.v1.unreadable. Start a new design or import a recovery copy.";showToast(storageIssue);return null}}
 function loadLibrary(){try{const value=JSON.parse(storageGet(LIBRARY_KEY));return value&&typeof value==="object"?value:{}}catch{quarantineStorage(LIBRARY_KEY);storageIssue="The local project library could not be read. The raw copy was kept under network-planner-studio.projects.v1.unreadable. Export current work before continuing.";showToast(storageIssue);return{}}}
+function showConflict(){
+  conflictProjectId=state.projectId;
+  clearTimeout(touch.timer);touch.timer=null;
+  $("#save-state").textContent="Conflict · autosave paused";
+  let panel=$("#storage-conflict");
+  if(!panel){
+    panel=document.createElement("aside");panel.id="storage-conflict";panel.setAttribute("role","alert");
+    panel.style.cssText="position:fixed;bottom:16px;left:16px;right:16px;z-index:10000;padding:16px;background:var(--panel,#fff);color:var(--text,#111);border:2px solid #b45309;border-radius:12px";
+    panel.innerHTML='<p>This design changed in another browser tab. Autosave is paused to protect both versions.</p><button type="button" data-conflict="reload">Reload latest</button> <button type="button" data-conflict="copy">Save my version as a copy</button> <button type="button" data-conflict="export">Export my version</button>';
+    panel.addEventListener("click",e=>{
+      const action=e.target.dataset.conflict;if(!action)return;
+      if(action==="export"){exportDesign();return}
+      if(action==="reload"){
+        const latest=loadLibrary()[state.projectId];if(!latest)return showToast("Latest design unavailable; export your version first.");
+        state=reviveDesign(latest);undoStack=[];redoStack=[];selected=null;
+      }else{state={...state,projectId:uid(),name:`${state.name} copy`}}
+      conflictProjectId=null;panel.remove();saveState();enterWorkspace();render();
+    });
+    document.body.append(panel);
+  }
+  showToast("This design changed in another browser tab. Autosave paused; choose a recovery action.");
+}
 function saveState(){
+  if(conflictProjectId===state.projectId){showConflict();return false}
+  if(conflictProjectId){conflictProjectId=null;$("#storage-conflict")?.remove()}
   state.updatedAt=new Date().toISOString();
   const saved=storageSet(STORAGE_KEY,JSON.stringify(state));
   const library=loadLibrary();library[state.projectId]=state;
-  const kept=Object.entries(library).sort((a,b)=>String(b[1].updatedAt).localeCompare(String(a[1].updatedAt))).slice(0,LIBRARY_LIMIT);
-  const librarySaved=storageSet(LIBRARY_KEY,JSON.stringify(Object.fromEntries(kept)));
+  const librarySaved=storageSet(LIBRARY_KEY,JSON.stringify(library));
   $("#save-state").textContent=saved&&librarySaved?"Saved locally":"Storage needs recovery";
   if(!saved||!librarySaved) showToast(storageIssue);
 }
@@ -125,6 +149,7 @@ function setMobileSites(open){
 }
 
 function start(mode){
+  if(conflictProjectId===state.projectId)return showConflict();
   if(mode==="sample") state=sampleState();
   else {state=blankState();state.mode=mode}
   undoStack=[];redoStack=[];nudgeBurst={siteId:null,at:0};expandedSites.clear();updateHistoryButtons();
@@ -460,11 +485,18 @@ function renderProjectLibrary(){
   const library=loadLibrary(),projects=Object.values(library).sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)));
   $("#project-list").innerHTML=projects.length?projects.map(p=>`<article class="project-card ${p.projectId===state.projectId?"current":""}"><div><strong>${escapeHtml(p.name)}</strong><small>${p.sites?.length||0} sites · updated ${new Date(p.updatedAt).toLocaleString()}${p.projectId===state.projectId?" · current":""}</small></div><div class="project-card-actions"><button class="button ghost" data-open-project="${p.projectId}" type="button">Open</button>${p.projectId===state.projectId?"":`<button class="button ghost" data-delete-project="${p.projectId}" type="button">Delete</button>`}</div></article>`).join(""):"<p>No saved designs yet.</p>";
 }
+function exportLibrary(){
+  const library=loadLibrary();const projects={...library,[state.projectId]:state};
+  const blob=new Blob([JSON.stringify({format:"network-planner-library.v1",projects},null,2)],{type:"application/json"});
+  const link=document.createElement("a");link.href=URL.createObjectURL(blob);link.download="network-planner-all-designs.json";link.click();setTimeout(()=>URL.revokeObjectURL(link.href),1000);
+  showToast("All designs backed up. The file contains your complete local library.");
+}
+$("#export-library").addEventListener("click",exportLibrary);
 function openProjects(){saveState();renderProjectLibrary();$("#projects-dialog").showModal()}
 function duplicateProject(){
   saveState();state=reviveDesign(JSON.parse(JSON.stringify(state)));state.projectId=uid();state.name=`${state.name} copy`;state.mode=state.mode||"existing";undoStack=[];redoStack=[];nudgeBurst={siteId:null,at:0};expandedSites.clear();saveState();renderProjectLibrary();render();showToast("Design duplicated");
 }
-function newProject(){state=blankState();state.mode="new";selected=null;undoStack=[];redoStack=[];nudgeBurst={siteId:null,at:0};expandedSites.clear();saveState();$("#projects-dialog").close();enterWorkspace();render();openSiteDialog()}
+function newProject(){if(conflictProjectId===state.projectId)return showConflict();state=blankState();state.mode="new";selected=null;undoStack=[];redoStack=[];nudgeBurst={siteId:null,at:0};expandedSites.clear();saveState();$("#projects-dialog").close();enterWorkspace();render();openSiteDialog()}
 
 function openSiteDialog(siteId=null){
   editingSiteId=siteId;const form=$("#site-form");form.reset();form.elements.devices.value=50;
@@ -654,7 +686,7 @@ document.addEventListener("click",e=>{
   if(e.target.closest("#duplicate-project"))return duplicateProject();
   if(e.target.closest("#new-project"))return newProject();
   if(e.target.closest("#print-report")){buildView("report");return window.print()}
-  const openProject=e.target.closest("[data-open-project]");if(openProject){const project=loadLibrary()[openProject.dataset.openProject];if(project){state=reviveDesign(project);selected=null;undoStack=[];redoStack=[];nudgeBurst={siteId:null,at:0};expandedSites.clear();saveState();$("#projects-dialog").close();enterWorkspace();render();showToast(`${state.name} opened`)}return}
+  const openProject=e.target.closest("[data-open-project]");if(openProject){if(conflictProjectId===state.projectId)return showConflict();const project=loadLibrary()[openProject.dataset.openProject];if(project){state=reviveDesign(project);selected=null;undoStack=[];redoStack=[];nudgeBurst={siteId:null,at:0};expandedSites.clear();saveState();$("#projects-dialog").close();enterWorkspace();render();showToast(`${state.name} opened`)}return}
   const deleteProject=e.target.closest("[data-delete-project]");if(deleteProject&&confirm("Delete this locally saved design?")){const library=loadLibrary();delete library[deleteProject.dataset.deleteProject];storageSet(LIBRARY_KEY,JSON.stringify(library));renderProjectLibrary();showToast("Design deleted");return}
   const recommendVlan=e.target.closest("[data-recommend-vlan]");if(recommendVlan)return openRecommendDialog("vlan",recommendVlan.dataset.recommendVlan);
   const recommendKind=e.target.closest("[data-recommend-kind]");if(recommendKind)return setRecommendationKind(recommendKind.dataset.recommendKind);
@@ -742,8 +774,20 @@ $("#recommend-form").addEventListener("change",()=>buildRecommendation());
 
 $("#file-input").addEventListener("change",async e=>{
   const file=e.target.files[0];if(!file)return;
-  if(file.size>IMPORT_MAX_BYTES){showToast(`Import failed: ${file.name} is larger than 10 MB`);e.target.value="";return}
-  try{const text=await file.text(),isCsv=file.name.toLowerCase().endsWith(".csv"),raw=isCsv?designFromCsv(text):JSON.parse(text.replace(/^\uFEFF/,"")),imported=isCsv?raw:migrateDesign(raw,{strict:true});pushHistory();state=imported;state.mode="imported";selected=null;expandedSites.clear();saveState();enterWorkspace();render();showToast(`${isCsv?"CSV":"Design"} imported and validated`)}
+  if(file.size>LIBRARY_IMPORT_MAX_BYTES){showToast(`Import failed: ${file.name} is larger than 64 MB`);e.target.value="";return}
+  try{if(conflictProjectId===state.projectId)throw new Error("Resolve the other-tab conflict or save your version as a copy before importing.");
+    const text=await file.text();
+    let bundle=null;try{bundle=JSON.parse(text)}catch{}
+    if(bundle?.format==="network-planner-library.v1"){
+      if(!bundle.projects||typeof bundle.projects!=="object"||Array.isArray(bundle.projects))throw new Error("Invalid library backup");
+      const imported=Object.values(bundle.projects).map(raw=>migrateDesign(raw,{strict:true}));
+      const library=loadLibrary();let restored=0;
+      for(let design of imported){if(library[design.projectId])design={...design,projectId:uid(),name:`${design.name} recovered`};library[design.projectId]=design;restored++}
+      if(!storageSet(LIBRARY_KEY,JSON.stringify(library)))throw new Error(storageIssue);
+      showToast(`${restored} designs restored; existing designs kept`);e.target.value="";return;
+    }
+    if(file.size>IMPORT_MAX_BYTES)throw new Error("Single designs are limited to 10 MB; library backups to 64 MB.");
+    const isCsv=file.name.toLowerCase().endsWith(".csv"),raw=isCsv?designFromCsv(text):JSON.parse(text.replace(/^\uFEFF/,"")),imported=isCsv?raw:migrateDesign(raw,{strict:true});pushHistory();state=imported;state.mode=state.mode||"imported";selected=null;expandedSites.clear();saveState();enterWorkspace();render();showToast(`${isCsv?"CSV":"Design"} imported and validated`)}
   catch(err){
     // A rejected import reports its first issue, but a large rejected design
     // must not silently hide how much else was wrong with it.
@@ -759,17 +803,17 @@ function designFromCsv(text){
   const decode=(value,key)=>{let textValue=String(value??"").trim();if(!textValue)return"";textValue=unguardCsvCell(textValue);if(["policies","flow policies","assumptions","links"].includes(key)){try{return JSON.parse(textValue)}catch{throw new Error(`CSV ${key} metadata is not valid JSON`)}}if(key==="site notes"||key==="vlan notes"){try{return JSON.parse(textValue)}catch{return textValue}}return textValue};
   const records=rows.slice(1).map(values=>Object.fromEntries(headers.map((header,index)=>[header,decode(values[index],header)]))),sites=[],siteById=new Map();let metadata=null;
   for(const record of records){
-    if(record["record type"]==="design")metadata=record;
+    if(record["record type"]==="design"||(!metadata&&record["project id"]))metadata=record;
     const siteKey=record["site id"]||record.site||uid();
     if(!record.site&&record["record type"]==="design")continue;
     let site=siteById.get(siteKey);
     if(!site){
       if(sites.length>=DESIGN_MAX_SITES)throw new DesignValidationError(`Designs are limited to ${DESIGN_MAX_SITES} sites`,[{path:"sites",message:`Designs are limited to ${DESIGN_MAX_SITES} sites`,code:"design-too-large"}]);
-      const index=sites.length;site={id:siteKey,name:record.site||"Imported site",type:record["site type"]||"office",cidr:record["site range"],devices:Number(record["site devices"]||record.devices||1),wan:record.wan||"single",growth:Number(record.growth||30),topologyRole:record["site role"]||record.role||"standalone",hubId:record["hub id"]||null,internetBreakout:record["internet breakout"]||"local",notes:record["site notes"]||"Imported from CSV",x:12+(index%3)*31,y:18+Math.floor(index/3)*34,vlans:[]};sites.push(site);siteById.set(siteKey,site)
+      const index=sites.length;site={id:siteKey,name:record.site||"Imported site",type:record["site type"]||"office",cidr:record["site range"],devices:Number(record["site devices"]||record.devices||1),wan:record.wan||"single",growth:Number(record.growth||30),topologyRole:record["site role"]||record.role||"standalone",hubId:record["hub id"]||null,internetBreakout:record["internet breakout"]||"local",notes:record["site notes"]??"Imported from CSV",x:record["site x"]!==undefined&&record["site x"]!==""?Number(record["site x"]):12+(index%3)*31,y:record["site y"]!==undefined&&record["site y"]!==""?Number(record["site y"]):18+Math.floor(index/3)*34,vlans:[]};sites.push(site);siteById.set(siteKey,site)
     }
     if(!headers.includes("record type")||record["record type"]==="vlan"||record.subnet){const vlanObjectId=record["vlan id"],vlanId=record.vlan||vlanObjectId;if(!vlanId)continue;const cidr=parseCidr(record.subnet).cidr,devices=Math.max(1,Number(record.devices||1)),reserved=Math.max(1,Number(record.reserved||1)),dhcpEnabled=String(record.dhcp||"enabled").toLowerCase()!=="disabled",gateway=record.gateway||firstUsable(cidr),automatic=defaultDhcpPool(cidr,reserved,{gateway}),start=dhcpEnabled?(record["dhcp start"]||automatic.start):"",end=dhcpEnabled?(record["dhcp end"]||automatic.end):"";site.vlans.push(createVlan({id:vlanObjectId&&/^[A-Za-z0-9_-]{1,80}$/.test(vlanObjectId)?vlanObjectId:uid(),name:record["vlan name"]||record.purpose||`VLAN ${vlanId}`,vid:Number(vlanId),role:record.purpose||"other",devices,cidr,gateway,dhcpEnabled,reserved,dhcpStart:start,dhcpEnd:end,notes:record["vlan notes"]||"",siteCidr:site.cidr}));}
   }
-  const raw={schema:SCHEMA_ID,version:SCHEMA_VERSION,projectId:metadata?.["project id"]||uid(),name:metadata?.["project name"]||"Imported address plan",mode:"imported",topologyMode:metadata?.["topology mode"]||"custom",policies:metadata?.policies||{spokeToSpoke:"via-hub",centralizedInspection:false,secondaryHubId:null},flowPolicies:metadata?.["flow policies"]||{},assumptions:metadata?.assumptions||["Imported from CSV; confirm site types, WAN design and routing."],sites,links:metadata?.links||[]};
+  const raw={schema:SCHEMA_ID,version:SCHEMA_VERSION,projectId:metadata?.["project id"]||uid(),name:metadata?.["project name"]||"Imported address plan",mode:metadata?.mode||"imported",topologyMode:metadata?.["topology mode"]||"custom",policies:metadata?.policies||{spokeToSpoke:"via-hub",centralizedInspection:false,secondaryHubId:null},flowPolicies:metadata?.["flow policies"]||{},assumptions:metadata?.assumptions||["Imported from CSV; confirm site types, WAN design and routing."],sites,links:metadata?.links||[]};
   return migrateDesign(raw,{strict:true});
 }
 
@@ -777,9 +821,9 @@ function exportDesign(){
   const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`${state.name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")||"network-design"}.json`;a.click();URL.revokeObjectURL(a.href);showToast("Design exported");
 }
 function exportCsv(){
-  const headers=["Record type","Project ID","Project name","Mode","Topology mode","Policies","Flow policies","Assumptions","Links","Site ID","Site","Site type","Site range","Site devices","WAN","Growth","Site role","Hub ID","Internet breakout","Site notes","VLAN ID","VLAN","VLAN name","Purpose","Subnet","Gateway","Devices","Endpoint capacity","DHCP","DHCP start","DHCP end","Reserved","VLAN notes"],rows=[headers],metadata=[state.projectId,state.name,state.mode||"",state.topologyMode,JSON.stringify(state.policies||{}),JSON.stringify(state.flowPolicies||{}),JSON.stringify(state.assumptions||[]),JSON.stringify(state.links||[])];
-  for(const site of state.sites){for(const v of site.vlans)rows.push(["vlan",...metadata,site.id,site.name,site.type,site.cidr,site.devices,site.wan,site.growth,site.topologyRole,site.hubId||"",site.internetBreakout,JSON.stringify(site.notes||""),v.id,v.vid,v.name,v.role,v.cidr,v.gateway,v.devices,safeCapacity(v),v.dhcpEnabled?"enabled":"disabled",v.dhcpStart||"",v.dhcpEnd||"",v.reserved??1,JSON.stringify(v.notes||"")]);if(!site.vlans.length)rows.push(["site",...metadata,site.id,site.name,site.type,site.cidr,site.devices,site.wan,site.growth,site.topologyRole,site.hubId||"",site.internetBreakout,JSON.stringify(site.notes||""),...Array(13).fill("")]);}
-  if(!state.sites.length)rows.push(["design",...metadata,...Array(24).fill("")]);
+  const headers=["Record type","Project ID","Project name","Mode","Topology mode","Policies","Flow policies","Assumptions","Links","Site ID","Site","Site type","Site range","Site devices","WAN","Growth","Site role","Hub ID","Internet breakout","Site notes","VLAN ID","VLAN","VLAN name","Purpose","Subnet","Gateway","Devices","Endpoint capacity","DHCP","DHCP start","DHCP end","Reserved","VLAN notes","Site X","Site Y"],rows=[headers],metadata=[state.projectId,state.name,state.mode||"",state.topologyMode,JSON.stringify(state.policies||{}),JSON.stringify(state.flowPolicies||{}),JSON.stringify(state.assumptions||[]),JSON.stringify(state.links||[])];
+  for(const site of state.sites){for(const v of site.vlans)rows.push(["vlan",...metadata,site.id,site.name,site.type,site.cidr,site.devices,site.wan,site.growth,site.topologyRole,site.hubId||"",site.internetBreakout,JSON.stringify(site.notes||""),v.id,v.vid,v.name,v.role,v.cidr,v.gateway,v.devices,safeCapacity(v),v.dhcpEnabled?"enabled":"disabled",v.dhcpStart||"",v.dhcpEnd||"",v.reserved??1,JSON.stringify(v.notes||""),site.x,site.y]);if(!site.vlans.length)rows.push(["site",...metadata,site.id,site.name,site.type,site.cidr,site.devices,site.wan,site.growth,site.topologyRole,site.hubId||"",site.internetBreakout,JSON.stringify(site.notes||""),...Array(13).fill(""),site.x,site.y]);}
+  rows.splice(1,0,["design",...metadata,...Array(headers.length-9).fill("")]);
   const csv=rows.map(row=>row.map(value=>`"${guardCsvCell(value).replaceAll('"','""')}"`).join(",")).join("\n"),blob=new Blob([csv],{type:"text/csv"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`${state.name.toLowerCase().replace(/[^a-z0-9]+/g,"-")||"network"}-address-plan.csv`;a.click();URL.revokeObjectURL(a.href);showToast("Address plan exported as CSV");
 }
 function animateTrace(linkId){
@@ -869,7 +913,7 @@ document.addEventListener("visibilitychange",()=>{if(document.visibilityState===
 window.addEventListener("storage",e=>{
   if(e.key!==STORAGE_KEY||!e.newValue)return;
   let incoming=null;try{incoming=JSON.parse(e.newValue)}catch{}
-  if(!incoming||incoming.projectId===state.projectId&&String(incoming.updatedAt)!==String(state.updatedAt))showToast("This design changed in another browser tab. Export this tab before reloading, or continue here to overwrite the other version.");
+  if(incoming&&incoming.projectId===state.projectId&&String(incoming.updatedAt)!==String(state.updatedAt))showConflict();
 });
 
 function findVlan(id){for(const site of state.sites){const vlan=site.vlans.find(v=>v.id===id);if(vlan)return{site,vlan}}return null}
