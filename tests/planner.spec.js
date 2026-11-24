@@ -140,6 +140,18 @@ test("renders a complete implementation report", async ({ page }) => {
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth)).toBe(true);
 });
 
+test("opening a VLAN editor never steals focus from the next field", async ({ page }) => {
+  await page.clock.install();
+  await page.locator(".vlan-row").first().click();
+  await page.locator("[data-edit-vlan]").click();
+  const start = page.locator('#vlan-form input[name="dhcpStart"]');
+  await start.fill("10.20.10.20");
+  await page.clock.runFor(100);
+  await expect(start).toBeFocused();
+  await expect(start).toHaveValue("10.20.10.20");
+  await expect(page.locator('#vlan-form input[name="name"]')).toHaveValue("Staff");
+});
+
 test("stores explicit DHCP pools outside the gateway", async ({ page }) => {
   await page.locator(".vlan-row").first().click();
   await page.locator("[data-edit-vlan]").click();

@@ -430,9 +430,10 @@ function renderCanvas(){
   // made dense topologies pay O(links x sites) per full pass.
   const byId=new Map(state.sites.map(s=>[s.id,s]));
   for(const site of state.sites){
-    const node=document.createElement("div"),position=nodePoint(site,geom),health=siteHealth(site);node.className=`topology-node role-${site.topologyRole||"standalone"} ${selected?.type==="site"&&selected.id===site.id?"selected":""}`;node.dataset.site=site.id;node.tabIndex=0;node.setAttribute("role","button");node.setAttribute("aria-label",`${site.name}, ${site.topologyRole||"standalone"} site, ${site.cidr}${health?`, ${healthWord(health)}`:""}`);
+    const node=document.createElement("div"),position=nodePoint(site,geom),health=siteHealth(site);node.className=`topology-node role-${site.topologyRole||"standalone"} ${selected?.type==="site"&&selected.id===site.id?"selected":""}`;node.dataset.site=site.id;node.tabIndex=0;node.setAttribute("role","button");
     node.style.left=`${position.left}px`;node.style.top=`${position.top}px`;node.style.width=`${geom.nodeWidth}px`;
     node.innerHTML=`<div class="node-head"><span class="node-icon">${site.topologyRole==="hub"?"HUB":TYPE_ICONS[site.type]||"ST"}</span><span class="node-copy"><strong>${escapeHtml(site.name)}</strong><small>${escapeHtml(site.cidr)} · ${escapeHtml(site.topologyRole||"standalone")}</small></span></div><div class="node-foot"><span><i class="health-dot ${health}"></i>${health?`<span class="health-flag ${health}">${health==="error"?"Errors":"Risks"}</span>`:""}${site.vlans.length} VLAN${site.vlans.length===1?"":"s"}</span><span>${site.devices} devices</span></div>`;
+    node.setAttribute("aria-label",`${node.textContent}${health?`, ${healthWord(health)}`:""}`);
     layer.append(node);
   }
   // Read card sizes in one batch after the new contents are laid out. Cache
@@ -637,7 +638,7 @@ function openSiteDialog(siteId=null){
   $("#site-dialog-title").textContent=site?"Edit site":"Add a site";$("#site-submit").textContent=site?"Save changes":"Add site";
   if(site){for(const key of ["name","type","devices","cidr","wan","growth","topologyRole","internetBreakout","notes"])if(form.elements[key])form.elements[key].value=site[key]??"";
     if(growth.value!==String(site.growth)){const option=document.createElement("option");option.value=String(site.growth);option.textContent=`${site.growth}% (from design)`;option.dataset.dynamicGrowth="";growth.add(option);growth.value=String(site.growth)}}
-  $("#site-form-error").textContent="";$("#site-dialog").showModal();setTimeout(()=>form.elements.name.focus(),50);
+  $("#site-form-error").textContent="";$("#site-dialog").showModal();form.elements.name.focus();
 }
 function openVlanDialog(siteId,vlanId=null){
   if(!state.sites.length){showToast("Add a site before adding a VLAN");return openSiteDialog()}
@@ -646,7 +647,7 @@ function openVlanDialog(siteId,vlanId=null){
   $("#vlan-dialog-title").textContent=found?"Edit VLAN":"Add a VLAN";$("#vlan-submit").textContent=found?"Save changes":"Add VLAN";
   if(found){form.elements.siteId.value=found.site.id;for(const key of ["name","vid","role","devices","cidr","gateway","dhcpStart","dhcpEnd","notes"])form.elements[key].value=found.vlan[key]??"";form.elements.dhcpEnabled.value=String(found.vlan.dhcpEnabled!==false);form.elements.reserved.value=found.vlan.reserved??1}
   else{const vid=nextAvailableVlanId(site);if(vid===null){editingVlanId=null;return showToast(`${site.name} has no free VLAN IDs`)}form.elements.vid.value=vid;form.elements.devices.value=30;form.elements.reserved.value=1}
-  form.elements.siteId.disabled=Boolean(found);$("#vlan-form-error").textContent="";$("#vlan-dialog").showModal();setTimeout(()=>form.elements.name.focus(),50);
+  form.elements.siteId.disabled=Boolean(found);$("#vlan-form-error").textContent="";$("#vlan-dialog").showModal();form.elements.name.focus();
 }
 function openConnectDialog(fromId,linkId=null){
   if(state.sites.length<2)return showToast("Add at least two sites before connecting them");
