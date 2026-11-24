@@ -52,6 +52,7 @@ let canvasPan = {x:0,y:0};
 let panDrag = null;
 let canvasDirty = false;
 let nodeHeights = new Map();
+let nodePositions = new Map();
 let activePointers = new Map();
 let pinch = null;
 let nudgeBurst = {siteId:null,at:0};
@@ -409,8 +410,9 @@ function canvasGeometry(){
 }
 function nodePoint(site,{w,h,nodeWidth}){
   const nodeHeight=nodeHeights.get(site.id)||88;
-  const left=Math.max(8,Math.min(w-nodeWidth-8,site.x/100*w)),top=Math.max(8,Math.min(h-nodeHeight-8,site.y/100*h));
-  return{left,top,x:left+nodeWidth/2,y:top+35};
+  const placed=nodePositions.get(site.id);
+  const left=Math.max(8,Math.min(w-nodeWidth-8,placed?.left??site.x/100*w)),top=Math.max(8,Math.min(h-nodeHeight-8,placed?.top??site.y/100*h));
+  return{left,top,x:left+nodeWidth/2,y:top+nodeHeight/2};
 }
 function linkGeometry(a,b,geom){
   const ap=nodePoint(a,geom),bp=nodePoint(b,geom),x1=ap.x,y1=ap.y,x2=bp.x,y2=bp.y;
@@ -423,7 +425,10 @@ function renderCanvas(){
   // viewBox. Defer instead and flush on view activation.
   if($("#topology-view").hidden||$("#workspace").classList.contains("hidden")){canvasDirty=true;return}
   canvasDirty=false;
-  const layer=$("#node-layer"),svg=$("#link-layer"),geom=canvasGeometry();
+  nodePositions.clear();
+  $("#canvas").style.minHeight="";
+  const layer=$("#node-layer"),svg=$("#link-layer");
+  let geom=canvasGeometry();
   layer.innerHTML="";svg.innerHTML="";
   svg.setAttribute("viewBox",`0 0 ${geom.w} ${geom.h}`);
   // Endpoint lookup through a Map: scanning every site per link endpoint
@@ -440,7 +445,20 @@ function renderCanvas(){
   // untransformed CSS heights so drag frames need no extra layout reads.
   const nodes=[...layer.children];
   nodeHeights=new Map(nodes.map(node=>[node.dataset.site,node.offsetHeight]));
-  for(const node of nodes){const site=byId.get(node.dataset.site);node.style.top=`${nodePoint(site,geom).top}px`;}
+  // Narrow diagrams use measured vertical lanes only where cards collide.
+  // Positions are presentation-only: resizing never rewrites the saved model.
+  if(geom.w<600){
+    const ordered=[...state.sites].sort((a,b)=>a.y-b.y);
+    const needed=ordered.reduce((height,site)=>height+nodeHeights.get(site.id)+16,8);
+    if(needed>geom.h){$("#canvas").style.minHeight=`${needed}px`;geom=canvasGeometry();}
+    let bottom=8;
+    for(const site of ordered){const point=nodePoint(site,geom);const top=Math.max(bottom,point.top);nodePositions.set(site.id,{left:point.left,top});bottom=top+nodeHeights.get(site.id)+16;}
+    // If desired gaps ran past the last boundary, pack backwards from it.
+    let end=geom.h-8;
+    for(const site of ordered.reverse()){const point=nodePositions.get(site.id);point.top=Math.min(point.top,end-nodeHeights.get(site.id));end=point.top-16;}
+  }
+  svg.setAttribute("viewBox",`0 0 ${geom.w} ${geom.h}`);
+  for(const node of nodes){const site=byId.get(node.dataset.site),point=nodePoint(site,geom);node.style.left=`${point.left}px`;node.style.top=`${point.top}px`;}
   for(const link of state.links){
     const a=byId.get(link.from),b=byId.get(link.to);if(!a||!b)continue;
     const shape=linkGeometry(a,b,geom);
@@ -893,6 +911,7 @@ document.addEventListener("keydown",e=>{
     const now=Date.now();
     if(nudgeBurst.siteId!==site.id||now-nudgeBurst.at>600)pushHistory();
     nudgeBurst={siteId:site.id,at:now};
+    const point=nodePoint(site,canvasGeometry());site.x=point.left/$("#canvas").clientWidth*100;site.y=point.top/$("#canvas").clientHeight*100;nodePositions.delete(site.id);
     if(e.key==="ArrowLeft")site.x=Math.max(0,site.x-2);
     if(e.key==="ArrowRight")site.x=Math.min(82,site.x+2);
     if(e.key==="ArrowUp")site.y=Math.max(0,site.y-2);
@@ -1003,7 +1022,8 @@ $("#canvas").addEventListener("pointerdown",e=>{
   const node=e.target.closest(".topology-node");
   if(!node){if(currentTool==="select"){panDrag={startX:e.clientX,startY:e.clientY,x:canvasPan.x,y:canvasPan.y};capturePointer(e)}return}
   const site=state.sites.find(s=>s.id===node.dataset.site);if(!site)return;
-  pushHistory();drag={site,node,startX:e.clientX,startY:e.clientY,x:site.x,y:site.y,moved:false};capturePointer(e);
+  const point=nodePoint(site,canvasGeometry());
+  pushHistory();drag={site,node,startX:e.clientX,startY:e.clientY,x:point.left/$("#canvas").clientWidth*100,y:point.top/$("#canvas").clientHeight*100,originalX:site.x,originalY:site.y,position:nodePositions.get(site.id),moved:false};capturePointer(e);
 });
 $("#canvas").addEventListener("pointermove",e=>{
   if(activePointers.has(e.pointerId))activePointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
@@ -1013,7 +1033,8 @@ $("#canvas").addEventListener("pointermove",e=>{
   }
   if(panDrag){canvasPan={x:panDrag.x+e.clientX-panDrag.startX,y:panDrag.y+e.clientY-panDrag.startY};applyCanvasZoom();return}
   if(!drag)return;const canvas=$("#canvas"),dx=(e.clientX-drag.startX)/canvasZoom,dy=(e.clientY-drag.startY)/canvasZoom;if(Math.abs(dx)+Math.abs(dy)>3)drag.moved=true;
-  drag.site.x=Math.max(0,Math.min(82,drag.x+dx/canvas.clientWidth*100));drag.site.y=Math.max(0,Math.min(84,drag.y+dy/canvas.clientHeight*100));moveNode(drag.site);
+  nodePositions.delete(drag.site.id);
+  drag.site.x=Math.max(0,Math.min(100,drag.x+dx/canvas.clientWidth*100));drag.site.y=Math.max(0,Math.min(100,drag.y+dy/canvas.clientHeight*100));moveNode(drag.site);
 });
 function releasePointer(e,commit){
   const wasPinch=pinch;
@@ -1034,7 +1055,7 @@ function releasePointer(e,commit){
   else{
     // A cancelled gesture never happened: put the node back where the drag
     // found it before dropping the history snapshot.
-    if(!commit){drag.site.x=drag.x;drag.site.y=drag.y;if(drag.moved)moveNode(drag.site)}
+    if(!commit){drag.site.x=drag.originalX;drag.site.y=drag.originalY;if(drag.position)nodePositions.set(drag.site.id,drag.position);if(drag.moved)moveNode(drag.site)}
     undoStack.pop();updateHistoryButtons();if(commit)select({type:"site",id:drag.site.id})
   }
   drag=null;
