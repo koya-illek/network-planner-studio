@@ -1,0 +1,3 @@
+`legacy-app.js` is the pre-overnight, pre-Web-Locks Planner application source captured in the batch-1 baseline (public deployed source lineage 2bc9bd2). It is intentionally frozen for same-origin mixed-generation browser fixtures. It still executes real legacy save/import/navigation code against the original v1 storage keys; the maintained core model and HTML remain compatible. Never ship this test-only file as a public asset. It contains no user data or provider configuration.
+
+Verified byte-for-byte against `git show 2bc9bd2:public/app.js` during batch 8. SHA-256: `279804e08e9f64787b8e59931f892fa5c72d2662f7d14386511d4a8a39d85078`.

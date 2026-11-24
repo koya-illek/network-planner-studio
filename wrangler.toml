@@ -20,3 +20,6 @@ custom_domain = true
 [[routes]]
 pattern = "netplanner.illek.ie"
 custom_domain = true
+
+[version_metadata]
+binding = "VERSION_METADATA"

@@ -752,6 +752,14 @@ export function reviewDesignIssues(design) {
   for (const link of links) {
     connectionCounts.set(link.from, (connectionCounts.get(link.from) || 0) + 1);
     connectionCounts.set(link.to, (connectionCounts.get(link.to) || 0) + 1);
+    // Two logical VPN paths may share one access circuit. Preserve this valid
+    // design intent, but do not present it as end-to-end outage protection.
+    if (link.resilience === "dual" && ["vpn", "internet"].includes(link.type)) {
+      for (const id of [link.from, link.to]) {
+        const endpoint = siteById.get(id);
+        if (endpoint?.wan === "single") issues.push(reviewIssue("warning", "Dual paths share a WAN dependency", `${siteById.get(link.from)?.name || link.from} to ${siteById.get(link.to)?.name || link.to} has dual logical paths, but ${endpoint.name} has a single WAN. An access-circuit outage can affect both paths; verify independent circuits before claiming end-to-end resilience.`, endpoint.id));
+      }
+    }
   }
   for (let i = 0; i < sites.length; i++) {
     const site = sites[i], sp = ranges[i];
@@ -1037,7 +1045,7 @@ export function exampleDesign() {
     ])
   });
   const links = [
-    createLink({ id: "link-hq-branch", from: "hq", to: "branch", type: "vpn", resilience: "dual", routingType: "bgp", transitAllowed: true, defaultRoute: true, advertisedPrefixes: [], notes: "Primary branch path." }),
+    createLink({ id: "link-hq-branch", from: "hq", to: "branch", type: "vpn", resilience: "single", routingType: "bgp", transitAllowed: true, defaultRoute: true, advertisedPrefixes: [], notes: "Single branch path; Dublin has one WAN circuit. Accept the outage risk or add independent connectivity." }),
     createLink({ id: "link-hq-cloud", from: "hq", to: "cloud", type: "vpn", resilience: "single", routingType: "bgp", transitAllowed: true, defaultRoute: false, advertisedPrefixes: [], notes: "Cloud application path." })
   ];
   return {

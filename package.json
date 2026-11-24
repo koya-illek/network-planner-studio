@@ -10,7 +10,7 @@
     "check:provenance": "node scripts/check-release.mjs",
     "check:release": "npm run check:provenance && npm test && npm run test:e2e && npm audit --omit=dev && wrangler deploy --dry-run",
     "check:production": "node scripts/check-production.mjs",
-    "deploy": "wrangler deploy"
+    "deploy": "node scripts/deploy.mjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.14.0",

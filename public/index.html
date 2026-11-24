@@ -86,7 +86,7 @@
       <nav class="view-tabs" aria-label="Planner views" role="tablist">
         <button class="active" data-view="topology" id="tab-topology" role="tab" aria-selected="true" aria-controls="topology-view" tabindex="0" type="button">Topology</button>
         <button data-view="addressing" id="tab-addressing" role="tab" aria-selected="false" aria-controls="addressing-view" tabindex="-1" type="button">Address plan</button>
-        <button data-view="review" id="tab-review" role="tab" aria-label="Design review" aria-selected="false" aria-controls="review-view" tabindex="-1" type="button">Review <span id="issue-count" class="count">0</span></button>
+        <button data-view="review" id="tab-review" role="tab" aria-selected="false" aria-controls="review-view" tabindex="-1" type="button">Review <span id="issue-count" class="count">0</span></button>
         <button data-view="policy" id="tab-policy" role="tab" aria-label="Traffic policies" aria-selected="false" aria-controls="policy-view" tabindex="-1" type="button">Policies</button>
         <button data-view="report" id="tab-report" role="tab" aria-label="Implementation report" aria-selected="false" aria-controls="report-view" tabindex="-1" type="button">Report</button>
       </nav>
@@ -147,12 +147,12 @@
       <div id="addressing-view" class="view" role="tabpanel" aria-labelledby="tab-addressing" tabindex="0">
         <section class="page-view">
           <div class="page-heading">
-            <div><h2>IPv4 address plan</h2><p>Generic IPv4 capacities. Verify cloud-provider reservations and managed DHCP rules separately.</p></div>
+            <div><h2 id="address-plan-title">IPv4 address plan</h2><p>Generic IPv4 capacities. Verify cloud-provider reservations and managed DHCP rules separately.</p></div>
             <div><button class="button ghost" id="csv-export" type="button">Export CSV</button> <button class="button primary" id="add-vlan-address" type="button">+ Add VLAN</button></div>
           </div>
           <div id="address-summary" class="summary-grid"></div>
           <div class="address-filter-row"><input id="address-filter" type="search" placeholder="Filter rows…" aria-label="Filter address plan rows by site, VLAN name, ID, subnet or role" autocomplete="off"><p id="address-filter-count" role="status"></p></div>
-          <div class="table-card">
+          <div class="table-card" tabindex="0" role="region" aria-labelledby="address-plan-title">
             <table>
               <thead><tr><th scope="col">Site / network</th><th scope="col">VLAN</th><th scope="col">IPv4 prefix</th><th scope="col">Gateway</th><th scope="col">Needed</th><th scope="col">Usable</th><th scope="col">Headroom</th><th scope="col">Status</th></tr></thead>
               <tbody id="address-table"></tbody>
@@ -174,8 +174,8 @@
 
       <div id="policy-view" class="view" role="tabpanel" aria-labelledby="tab-policy" tabindex="0">
         <section class="page-view">
-          <div class="page-heading"><div><h2>Traffic policy</h2><p>Define the intended relationship between VLAN roles. Click a cell to cycle allow, restricted and deny.</p></div></div>
-          <div id="flow-matrix" class="table-card flow-matrix"></div>
+          <div class="page-heading"><div><h2 id="traffic-policy-title">Traffic policy</h2><p>Define the intended relationship between VLAN roles. Click a cell to cycle allow, restricted and deny.</p></div></div>
+          <div id="flow-matrix" class="table-card flow-matrix" tabindex="0" role="region" aria-labelledby="traffic-policy-title"></div>
         </section>
       </div>
 
@@ -239,7 +239,7 @@
         <label>From<select name="from" required></select></label>
         <label>To<select name="to" required></select></label>
         <label>Connection<select name="type"><option value="vpn">Site-to-site VPN</option><option value="private">Private WAN</option><option value="peering">Cloud peering</option><option value="internet">Internet</option></select></label>
-        <label>Resilience<select name="resilience"><option value="single">Single path</option><option value="dual">Dual / redundant</option></select></label>
+        <label>Link paths<select name="resilience"><option value="single">Single path</option><option value="dual">Dual logical paths</option></select><small>Independent WAN circuits must be verified separately.</small></label>
         <label>Routing<select name="routingType"><option value="static">Static routes</option><option value="bgp">Dynamic / BGP</option></select></label>
         <label>Transit<select name="transitAllowed"><option value="true">Allow transit</option><option value="false">Endpoint only</option></select></label>
         <label class="wide check-label"><input name="defaultRoute" type="checkbox"> Advertise a default route over this connection</label>
@@ -314,7 +314,7 @@
   <dialog id="projects-dialog" class="projects-dialog" aria-labelledby="projects-dialog-title">
     <div class="dialog-heading"><div><h2 id="projects-dialog-title">Your designs</h2><p>Designs stay in this browser. Duplicate a design before exploring an alternative.</p></div><button class="dialog-close" type="button" data-close-dialog aria-label="Close">×</button></div>
     <div id="project-list" class="project-list"></div>
-    <div class="dialog-actions"><button class="button secondary" id="duplicate-project" type="button">Duplicate current</button><button class="button primary" id="new-project" type="button">New design</button></div>
+    <div class="dialog-actions"><button class="button ghost" id="export-library" type="button">Back up all designs</button><button class="button secondary" id="duplicate-project" type="button">Duplicate current</button><button class="button primary" id="new-project" type="button">New design</button></div>
   </dialog>
 
   <input id="file-input" type="file" accept="application/json,text/csv,.json,.csv" hidden>

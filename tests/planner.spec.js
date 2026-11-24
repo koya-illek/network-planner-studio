@@ -6,6 +6,7 @@ test.beforeEach(async ({ page }) => {
   await page.evaluate(() => localStorage.clear());
   await page.reload();
   await page.getByText("explore a complete example").click();
+  await expect(page.locator("#save-state")).toHaveText("Saved locally");
 });
 
 test("traces between spokes through the hub", async ({ page }) => {
@@ -40,19 +41,21 @@ test("editing a VLAN can be undone and redone", async ({ page }) => {
   await page.locator("#undo-button").click();
   await page.locator("#utility-menu > summary").click();
   await page.locator("#redo-button").click();
-  const stored=await page.evaluate(()=>JSON.parse(localStorage.getItem("network-planner-studio.v1")));
+  await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem("network-planner-studio.v2")).sites[0].vlans[0].devices)).toBe(110);
+  const stored=await page.evaluate(()=>JSON.parse(localStorage.getItem("network-planner-studio.v2")));
   expect(stored.sites[0].vlans[0].devices).toBe(110);
   expect(stored.sites[0].vlans[0].id).toBe(originalId);
 });
 
 test("editing a connection keeps its stable ID", async ({ page }) => {
   const originalId=await page.locator(".link-hit").first().getAttribute("data-link");
+  const originalNotes=await page.evaluate(()=>JSON.parse(localStorage.getItem("network-planner-studio.v2")).links[0].notes);
   await page.locator(".link-hit").first().focus();
   await page.keyboard.press("Enter");
   await page.locator("[data-edit-link]").click();
-  await page.locator("#connect-form select[name=resilience]").selectOption("single");
+  await page.locator("#connect-form select[name=resilience]").selectOption("dual");
   await page.locator("#connect-form button[type=submit]").click();
-  await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem("network-planner-studio.v1")).links[0])).toMatchObject({id:originalId,notes:"Primary branch path."});
+  await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem("network-planner-studio.v2")).links[0])).toMatchObject({id:originalId,resilience:"dual",notes:originalNotes});
 });
 
 test("a failed VLAN edit cannot turn into an accidental site move", async ({ page }) => {
@@ -74,7 +77,7 @@ test("accepts a custom gateway and excludes it from the default pool", async ({ 
   await page.locator("#vlan-form input[name=dhcpStart]").fill("");
   await page.locator("#vlan-form input[name=dhcpEnd]").fill("");
   await page.locator("#vlan-form button[type=submit]").click();
-  await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem("network-planner-studio.v1")).sites[0].vlans[0])).toMatchObject({gateway:"10.20.10.126",dhcpStart:"10.20.10.2",dhcpEnd:"10.20.10.125"});
+  await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem("network-planner-studio.v2")).sites[0].vlans[0])).toMatchObject({gateway:"10.20.10.126",dhcpStart:"10.20.10.2",dhcpEnd:"10.20.10.125"});
   await expect(page.locator("#inspector")).toContainText("10.20.10.126");
 });
 
@@ -107,7 +110,7 @@ test("imports RFC 4180 multiline CSV fields", async ({ page }) => {
   await page.locator("#file-input").setInputFiles({name:"multiline.csv",mimeType:"text/csv",buffer:Buffer.from(csv)});
   await expect(page.locator("#toast")).toContainText("CSV imported and validated");
   await expect.poll(() => page.evaluate(() => {
-    const design=JSON.parse(localStorage.getItem("network-planner-studio.v1"));
+    const design=JSON.parse(localStorage.getItem("network-planner-studio.v2"));
     return {site:design.sites[0].notes,vlan:design.sites[0].vlans[0].notes};
   })).toEqual({site:"First line\r\nSecond line",vlan:'Firewall "handoff"\r\nRack 4'});
 });
@@ -115,7 +118,7 @@ test("imports RFC 4180 multiline CSV fields", async ({ page }) => {
 test("builds a safe default DHCP pool for a custom CSV gateway", async ({ page }) => {
   const csv="Site,Role,Site range,VLAN,VLAN name,Purpose,Subnet,Gateway,Devices,DHCP,Reserved\nCork,standalone,10.44.0.0/16,10,Staff,users,10.44.10.0/24,10.44.10.254,80,enabled,1";
   await page.locator("#file-input").setInputFiles({name:"custom-gateway.csv",mimeType:"text/csv",buffer:Buffer.from(csv)});
-  await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem("network-planner-studio.v1")).sites[0].vlans[0])).toMatchObject({gateway:"10.44.10.254",dhcpStart:"10.44.10.2",dhcpEnd:"10.44.10.253"});
+  await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem("network-planner-studio.v2")).sites[0].vlans[0])).toMatchObject({gateway:"10.44.10.254",dhcpStart:"10.44.10.2",dhcpEnd:"10.44.10.253"});
 });
 
 test("duplicates and reopens local projects", async ({ page }) => {
@@ -137,6 +140,18 @@ test("renders a complete implementation report", async ({ page }) => {
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth)).toBe(true);
 });
 
+test("opening a VLAN editor never steals focus from the next field", async ({ page }) => {
+  await page.clock.install();
+  await page.locator(".vlan-row").first().click();
+  await page.locator("[data-edit-vlan]").click();
+  const start = page.locator('#vlan-form input[name="dhcpStart"]');
+  await start.fill("10.20.10.20");
+  await page.clock.runFor(100);
+  await expect(start).toBeFocused();
+  await expect(start).toHaveValue("10.20.10.20");
+  await expect(page.locator('#vlan-form input[name="name"]')).toHaveValue("Staff");
+});
+
 test("stores explicit DHCP pools outside the gateway", async ({ page }) => {
   await page.locator(".vlan-row").first().click();
   await page.locator("[data-edit-vlan]").click();
@@ -153,7 +168,7 @@ test("keeps a stored gateway when a VLAN is edited", async ({ page }) => {
   await page.locator("[data-edit-vlan]").click();
   await page.locator("#vlan-form input[name=name]").fill("Staff renamed");
   await page.locator("#vlan-form button[type=submit]").click();
-  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("network-planner-studio.v1")).sites[0].vlans[0]), { timeout: 2000 }).toMatchObject({ name:"Staff renamed", gateway:"10.60.10.254" });
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("network-planner-studio.v2")).sites[0].vlans[0]), { timeout: 2000 }).toMatchObject({ name:"Staff renamed", gateway:"10.60.10.254" });
   await expect(page.locator("#inspector")).toContainText("10.60.10.254");
 });
 
@@ -166,9 +181,9 @@ test("rejects invalid gateways and hostile imported policy values", async ({ pag
 
 test("reports corrections made while recovering stored design data", async ({ page }) => {
   await page.evaluate(() => {
-    const design=JSON.parse(localStorage.getItem("network-planner-studio.v1"));
+    const design=JSON.parse(localStorage.getItem("network-planner-studio.v2"));
     design.sites[0].vlans[0].vid=5000;
-    localStorage.setItem("network-planner-studio.v1",JSON.stringify(design));
+    localStorage.setItem("network-planner-studio.v2",JSON.stringify(design));
   });
   await page.reload();
   await page.locator('[data-view="review"]').click();
@@ -283,8 +298,7 @@ test("flushes a pending debounced save when the page is hidden", async ({ page }
   await page.locator("#name-form input[name=name]").fill("Flush test");
   await page.locator("#name-form button[type=submit]").click();
   await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
-  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("network-planner-studio.v1")).name);
-  expect(stored).toBe("Flush test");
+  await expect.poll(()=>page.evaluate(() => JSON.parse(localStorage.getItem("network-planner-studio.v2")).name)).toBe("Flush test");
 });
 
 test("warns when the current design changes in another browser tab", async ({ page }) => {
@@ -300,7 +314,7 @@ test("warns when the current design changes in another browser tab", async ({ pa
 test("does not report a conflict when another tab saves a different design", async ({ page }) => {
   const other = await page.context().newPage();
   await other.goto("/");
-  await other.evaluate(() => localStorage.setItem("network-planner-studio.v1", JSON.stringify({projectId:"different-project",updatedAt:new Date().toISOString()})));
+  await other.evaluate(() => localStorage.setItem("network-planner-studio.v2", JSON.stringify({projectId:"different-project",updatedAt:new Date().toISOString()})));
   await page.waitForTimeout(300);
   await expect(page.locator("#toast")).not.toContainText("another browser tab");
   await other.close();
@@ -459,7 +473,7 @@ test("restores a dragged node when the gesture is cancelled", async ({ page }) =
 
 test("settles a moved node drag when a pinch takes over", async ({ page }) => {
   await page.locator(".topology-node").first().waitFor();
-  const storedX = () => page.evaluate(() => JSON.parse(localStorage.getItem("network-planner-studio.v1")).sites[0].x);
+  const storedX = () => page.evaluate(() => JSON.parse(localStorage.getItem("network-planner-studio.v2")).sites[0].x);
   const before = await storedX();
   await page.evaluate(() => {
     const canvas = document.querySelector("#canvas");
@@ -483,36 +497,36 @@ test("settles a moved node drag when a pinch takes over", async ({ page }) => {
 test("makes an arrow-key nudge burst undoable and redoable", async ({ page }) => {
   const node = page.locator(".topology-node").first();
   await node.waitFor();
-  const storedX = () => page.evaluate(() => JSON.parse(localStorage.getItem("network-planner-studio.v1")).sites[0].x);
+  const storedX = () => page.evaluate(() => JSON.parse(localStorage.getItem("network-planner-studio.v2")).sites[0].x);
   await node.focus();
   await page.keyboard.press("ArrowRight");
   await page.keyboard.press("ArrowRight");
   await page.keyboard.press("ArrowRight");
   await expect(page.locator("#undo-button")).toBeEnabled();
   await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+  await expect.poll(storedX).toBeGreaterThan(42);
   const moved = await storedX();
-  expect(moved).toBeGreaterThan(42);
   await page.locator("#utility-menu > summary").click();
   await page.locator("#undo-button").click();
-  expect(await storedX()).toBe(42);
+  await expect.poll(storedX).toBe(42);
   await page.locator("#utility-menu > summary").click();
   await page.locator("#redo-button").click();
-  expect(await storedX()).toBe(moved);
+  await expect.poll(storedX).toBe(moved);
 });
 
 test("keeps rapid keyboard nudges on different nodes in separate history entries", async ({ page }) => {
   const nodes = page.locator(".topology-node");
-  const positions = () => page.evaluate(() => JSON.parse(localStorage.getItem("network-planner-studio.v1")).sites.slice(0,2).map(site => site.x));
+  const positions = () => page.evaluate(() => JSON.parse(localStorage.getItem("network-planner-studio.v2")).sites.slice(0,2).map(site => site.x));
   await nodes.nth(0).focus();
   await page.keyboard.press("ArrowRight");
   await nodes.nth(1).focus();
   await page.keyboard.press("ArrowRight");
   await page.locator("#utility-menu > summary").click();
   await page.locator("#undo-button").click();
-  expect(await positions()).toEqual([44,70]);
+  await expect.poll(positions).toEqual([44,70]);
   await page.locator("#utility-menu > summary").click();
   await page.locator("#undo-button").click();
-  expect(await positions()).toEqual([42,70]);
+  await expect.poll(positions).toEqual([42,70]);
 });
 
 test("keeps focus recoverable when a background save-render lands during a dialog", async ({ page }) => {
@@ -538,15 +552,14 @@ test("keeps focus recoverable when a background save-render lands during a dialo
 });
 
 test("quarantines an unreadable project library instead of erasing it", async ({ page }) => {
-  await page.evaluate(() => localStorage.setItem("network-planner-studio.projects.v1", "{not json"));
+  await page.evaluate(() => localStorage.setItem("network-planner-studio.projects.v2", "{not json"));
   await page.locator("#utility-menu > summary").click();
   await page.locator("#projects-button").click();
-  const quarantined = await page.evaluate(() => localStorage.getItem("network-planner-studio.projects.v1.unreadable"));
+  const quarantined = await page.evaluate(() => localStorage.getItem("network-planner-studio.projects.v2.unreadable"));
   expect(quarantined).toBe("{not json");
   await expect(page.locator("#project-list")).toContainText("Illek example network");
   await expect(page.locator("#toast")).toContainText("could not be read");
-  const reseeded = await page.evaluate(() => Object.keys(JSON.parse(localStorage.getItem("network-planner-studio.projects.v1"))));
-  expect(reseeded).toHaveLength(1);
+  await expect.poll(()=>page.evaluate(() => {try{return Object.keys(JSON.parse(localStorage.getItem("network-planner-studio.projects.v2")))}catch{return []}})).toHaveLength(1);
   await page.keyboard.press("Escape");
 });
 
@@ -556,16 +569,16 @@ test("flushes a pending debounced save when the tab is backgrounded", async ({ p
   await page.locator("#name-form button[type=submit]").click();
   await page.evaluate(() => Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" }));
   await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
-  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("network-planner-studio.v1")).name)).toBe("Background flush test");
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("network-planner-studio.v2")).name)).toBe("Background flush test");
 });
 
 test("canvas nodes and links announce health and resilience in words", async ({ page }) => {
   await expect(page.locator(".topology-node .health-flag.warning").first()).toHaveText("Risks");
   const flagged = await page.locator('.topology-node[aria-label*="risks to review"]').count();
   expect(flagged).toBeGreaterThan(0);
-  const dualLabel = await page.locator(".link-hit").first().getAttribute("aria-label");
-  expect(dualLabel).toMatch(/redundant paths/);
-  expect(dualLabel).toMatch(/vpn/);
+  const pathLabel = await page.locator(".link-hit").first().getAttribute("aria-label");
+  expect(pathLabel).toMatch(/single path/);
+  expect(pathLabel).toMatch(/vpn/);
 });
 
 test("trace progress is a live region", async ({ page }) => {
@@ -591,7 +604,7 @@ test("escape clears the inspector selection", async ({ page }) => {
 });
 
 test("undo and redo answer their keyboard shortcuts", async ({ page }) => {
-  const devices = () => page.evaluate(() => JSON.parse(localStorage.getItem("network-planner-studio.v1")).sites[0].vlans[0].devices);
+  const devices = () => page.evaluate(() => JSON.parse(localStorage.getItem("network-planner-studio.v2")).sites[0].vlans[0].devices);
   await page.locator(".vlan-row").first().click();
   await page.locator("[data-edit-vlan]").click();
   await page.locator("#vlan-form input[name=devices]").fill("111");
@@ -654,7 +667,7 @@ test("a rejected multi-issue import says how many problems it hides", async ({ p
   await expect(toast).toContainText("Import failed:");
   await expect(toast).toContainText(/more issues not shown/);
   // The rejected file must not have replaced the loaded design.
-  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("network-planner-studio.v1")).name)).toBe("Illek example network");
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("network-planner-studio.v2")).name)).toBe("Illek example network");
 });
 
 test("a named design with no sites yet stays reachable from home", async ({ page }) => {
@@ -680,7 +693,7 @@ test("a large imported design collapses the site tree and answers filtering", as
       ] });
     }
     const design = { schema: "network-planner-studio/design", version: 3, projectId: "big", name: "Depot fleet", mode: "imported", topologyMode: "custom", policies: { spokeToSpoke: "via-hub", centralizedInspection: false, secondaryHubId: null }, flowPolicies: {}, assumptions: [], sites, links: [{ id: "l1", from: "s0", to: "s1", type: "vpn", resilience: "single", routingType: "static", transitAllowed: true, defaultRoute: false, advertisedPrefixes: [], notes: "" }], updatedAt: new Date().toISOString() };
-    localStorage.setItem("network-planner-studio.v1", JSON.stringify(design));
+    localStorage.setItem("network-planner-studio.v2", JSON.stringify(design));
   });
   await page.reload();
   await expect(page.locator("#workspace")).toBeVisible();
@@ -770,4 +783,101 @@ test("the CSV export stays complete while the table is filtered", async ({ page 
   const download = await downloadPromise;
   const csv = await (await import("node:fs/promises")).readFile(await download.path(), "utf8");
   expect(csv.match(/"vlan"/g).length).toBe(9);
+});
+
+
+test("example report distinguishes logical link paths from site WAN resilience", async ({ page }) => {
+  await page.locator('[data-view="report"]').click();
+  const report = page.locator("#implementation-report");
+  await expect(report).toContainText("not verified circuit independence");
+  const branchLink = report.locator("tr").filter({hasText: "Cork HQ to Dublin office"});
+  await expect(branchLink).toContainText("Single path");
+  await expect(branchLink).toContainText("Dublin has one WAN circuit");
+  await expect(report).toContainText("Dublin office has inter-site connectivity but only one WAN path");
+});
+
+test("opening Projects preserves libraries larger than twenty designs", async ({page}) => {
+  await page.evaluate(() => {
+    const current=JSON.parse(localStorage.getItem('network-planner-studio.v2'));
+    const library=Object.fromEntries(Array.from({length:25},(_,i)=>['saved-'+i,{...current,projectId:'saved-'+i,name:'Saved '+i}]));
+    library[current.projectId]=current;
+    localStorage.setItem('network-planner-studio.projects.v2',JSON.stringify(library));
+  });
+  await page.locator('#utility-menu summary').click();
+  await page.getByRole('button',{name:'Projects',exact:true}).click();
+  expect(await page.evaluate(()=>Object.keys(JSON.parse(localStorage.getItem('network-planner-studio.projects.v2'))).length)).toBe(26);
+});
+
+test("CSV round-trip preserves identity, WAN links and design policy", async ({page})=>{
+  const before=await page.evaluate(()=>JSON.parse(localStorage.getItem('network-planner-studio.v2')));
+  await page.locator('[data-view=addressing]').click();
+  const pending=page.waitForEvent('download');
+  await page.locator('#csv-export').click();
+  const csv=await (await import('node:fs/promises')).readFile(await (await pending).path(),'utf8');
+  await page.locator('#file-input').setInputFiles({name:'roundtrip.csv',mimeType:'text/csv',buffer:Buffer.from(csv)});
+  await expect(page.locator('#toast')).toContainText('CSV imported and validated');
+  const after=await page.evaluate(()=>JSON.parse(localStorage.getItem('network-planner-studio.v2')));
+  for(const field of ['projectId','name','mode','topologyMode','policies','flowPolicies','assumptions','links','sites'])expect(after[field]).toEqual(before[field]);
+});
+
+test("cross-tab conflict blocks autosave and pagehide until saving a copy",async({page})=>{
+  const other=await page.context().newPage();await other.goto('/');
+  await other.locator('#project-name-button').click();
+  await other.locator('#name-form input[name=name]').fill('Other version');
+  await other.locator('#name-form button[type=submit]').click();
+  await expect(page.locator('#storage-conflict')).toBeVisible();
+  await page.locator('#project-name-button').click();
+  await page.locator('#name-form input[name=name]').fill('My version');
+  await page.locator('#name-form button[type=submit]').click();
+  await page.evaluate(()=>window.dispatchEvent(new Event('pagehide')));
+  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('network-planner-studio.v2')).name)).toBe('Other version');
+  await page.getByRole('button',{name:'Save my version as a copy',exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>Object.values(JSON.parse(localStorage.getItem('network-planner-studio.projects.v2'))).map(p=>p.name))).toEqual(expect.arrayContaining(['Other version','My version copy']));
+  await other.close();
+});
+
+test('complete library backups restore without replacing existing designs',async({page})=>{
+  await page.locator('#utility-menu summary').click();await page.locator('#projects-button').click();
+  const pending=page.waitForEvent('download');await page.getByRole('button',{name:'Back up all designs'}).click();
+  const text=await (await import('node:fs/promises')).readFile(await (await pending).path(),'utf8');
+  const bundle=JSON.parse(text);expect(Object.keys(bundle.projects)).toHaveLength(1);
+  await page.locator('#projects-dialog [data-close-dialog]').click();
+  await page.locator('#file-input').setInputFiles({name:'library.json',mimeType:'application/json',buffer:Buffer.from(text)});
+  await expect(page.locator('#toast')).toContainText('1 designs restored; existing designs kept');
+  expect(await page.evaluate(()=>Object.keys(JSON.parse(localStorage.getItem('network-planner-studio.projects.v2'))).length)).toBe(2);
+});
+
+
+test('library-only changes with identical timestamps pause saves and backup keeps both versions',async({page})=>{
+  await page.evaluate(()=>{
+    const key='network-planner-studio.projects.v2';
+    const library=JSON.parse(localStorage.getItem(key));
+    const id=JSON.parse(localStorage.getItem('network-planner-studio.v2')).projectId;
+    library[id].name='Latest library version';
+    localStorage.setItem(key,JSON.stringify(library));
+  });
+  // A same-document write emits no storage event: the pre-save check must catch it.
+  await page.locator('#utility-menu summary').click();await page.locator('#projects-button').click();
+  await expect(page.locator('#storage-conflict')).toBeVisible();
+  const pending=page.waitForEvent('download');await page.getByRole('button',{name:'Back up all designs'}).click();
+  const bundle=JSON.parse(await (await import('node:fs/promises')).readFile(await (await pending).path(),'utf8'));
+  expect(Object.values(bundle.projects).map(p=>p.name)).toEqual(expect.arrayContaining(['Latest library version','Illek example network recovery copy']));
+  expect(Object.keys(bundle.projects)).toHaveLength(2);
+  const names=await page.evaluate(()=>Object.values(JSON.parse(localStorage.getItem('network-planner-studio.projects.v2'))).map(p=>p.name));
+  expect(names).toEqual(['Latest library version']);
+  await page.locator('#projects-dialog [data-close-dialog]').click();
+  await page.getByRole('button',{name:'Reload latest',exact:true}).click();
+  await expect(page.locator('#project-name-button')).toContainText('Latest library version');
+  await expect(page.locator('#storage-conflict')).toHaveCount(0);
+});
+
+test('deleting the active design from another tab pauses resurrection and allows a recovery copy',async({page})=>{
+  const other=await page.context().newPage();await other.goto('/');
+  await other.evaluate(()=>localStorage.setItem('network-planner-studio.projects.v2','{}'));
+  await expect(page.locator('#storage-conflict')).toBeVisible();
+  await page.evaluate(()=>window.dispatchEvent(new Event('pagehide')));
+  expect(await page.evaluate(()=>localStorage.getItem('network-planner-studio.projects.v2'))).toBe('{}');
+  await page.getByRole('button',{name:'Save my version as a copy',exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>Object.keys(JSON.parse(localStorage.getItem('network-planner-studio.projects.v2'))).length)).toBe(1);
+  await other.close();
 });
