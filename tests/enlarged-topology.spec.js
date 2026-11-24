@@ -8,7 +8,7 @@ async function geometry(page){
  for(const a of result){expect(a.overflow).toBeLessThanOrEqual(1);for(const b of result)if(a.id!==b.id)expect(a.right<=b.left||b.right<=a.left||a.bottom<=b.top||b.bottom<=a.top).toBeTruthy()}
  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(await page.evaluate(()=>innerWidth));
  const labelCollisions=await page.evaluate(()=>{const nodes=[...document.querySelectorAll('.topology-node')].map(n=>n.getBoundingClientRect());return [...document.querySelectorAll('.link-label')].flatMap(n=>{const r=n.getBoundingClientRect();return nodes.some(b=>r.left<b.right&&r.right>b.left&&r.top<b.bottom&&r.bottom>b.top)?[{label:n.textContent,rect:r.toJSON()}]:[]})});
- if(await page.evaluate(()=>parseFloat(getComputedStyle(document.documentElement).fontSize))===32)expect(labelCollisions).toEqual([]);
+ expect(labelCollisions).toEqual([]);
  const bounds=await page.evaluate(()=>({canvas:document.querySelector('#canvas').getBoundingClientRect().bottom,view:document.querySelector('#topology-view').getBoundingClientRect().bottom}));expect(bounds.canvas).toBeLessThanOrEqual(bounds.view+1);
  return result;
 }
@@ -42,8 +42,9 @@ for(const width of [320,390,768,1440])test(`default geometry matches accepted re
  await page.goto('/');await page.getByText('explore a complete example').click();
  const candidate=await page.locator('.topology-node').evaluateAll(nodes=>nodes.map(n=>({id:n.dataset.site,left:n.offsetLeft,top:n.offsetTop,width:n.offsetWidth,height:n.offsetHeight})));
  await writeFile(info.outputPath('default-geometry.json'),JSON.stringify({baseline:baselineGeometry[width],candidate},null,2));expect(candidate).toEqual(baselineGeometry[width]);
- await page.close();
+ await geometry(page);await page.close();
 });
+for(const width of [320,390,1440])test.describe(`root16 glyphs ${width} coarse`,()=>{test.use({viewport:{width,height:1000},hasTouch:true});test('route labels remain clear of unchanged cards',async({page})=>{await page.goto('/');await page.getByText('explore a complete example').click();await geometry(page)})});
 for(const rootSize of [16,32])test(`long site names and full IP addresses at root ${rootSize}`,async({page},info)=>{
  await page.setViewportSize({width:1440,height:1000});await page.goto('/');await page.evaluate(size=>document.documentElement.style.fontSize=`${size}px`,rootSize);await page.getByText('explore a complete example').click();
  const design=exampleDesign();design.sites.push({...design.sites[0],id:'long-ip',name:'Long IP address location',cidr:'192.168.255.0/24',vlans:[],topologyRole:'standalone',hubId:null,x:30,y:40});for(const site of design.sites)site.name='Long infrastructure branch location with extended descriptive operational name '+site.id;

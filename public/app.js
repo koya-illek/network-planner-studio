@@ -53,7 +53,7 @@ let panDrag = null;
 let canvasDirty = false;
 let nodeHeights = new Map();
 let nodeWidths = new Map();
-let nodeRects = new Map(), labelBoxes = new Map(), enlargedLabels = false;
+let nodeRects = new Map(), labelBoxes = new Map();
 let nodePositions = new Map();
 let activePointers = new Map();
 let pinch = null;
@@ -467,7 +467,7 @@ function renderCanvas(){
   sample.setAttribute("class","link-label");sample.textContent="VPN";svg.append(sample);
   const glyph=sample.getBBox(),labelFont=parseFloat(getComputedStyle(sample).fontSize);
   const clearance=labelFont>12?Math.max(16,Math.ceil(2*(Math.abs(glyph.y)+7)+16)):16;
-  sample.remove();enlargedLabels=labelFont>12;labelBoxes.clear();
+  sample.remove();labelBoxes.clear();
   // Narrow diagrams use measured vertical lanes only where cards collide.
   // Positions are presentation-only: resizing never rewrites the saved model.
   if(geom.w<600){
@@ -507,21 +507,24 @@ function renderCanvas(){
     const shape=linkGeometry(a,b,geom);
     svg.insertAdjacentHTML("beforeend",`<path id="route-${link.id}" d="${shape.d}" class="link ${link.resilience==="dual"?"dual":""}"/><path d="${shape.d}" class="link-hit" data-link="${link.id}" tabindex="0" role="button" aria-label="${escapeHtml(`${a.name} to ${b.name}: ${linkLabel(link).toLowerCase()}, ${link.resilience==="dual"?"dual logical paths":"single path"}`)}"/><text class="link-label" data-link="${link.id}" x="${shape.midX}" y="${shape.midY-7}" text-anchor="middle">${linkLabel(link)}</text>`);
   }
-  if(enlargedLabels){
+  {
     const labels=[...svg.querySelectorAll(".link-label")];
-    const boxes=labels.map(label=>{const b=label.getBBox();return{width:b.width,height:b.height,offset:b.y-Number(label.getAttribute("y"))}});
+    const boxes=labels.map(label=>{const b=label.getBBox();return{width:b.width,height:b.height,offset:b.y-Number(label.getAttribute("y")),margin:labelFont>12?4:1}});
     labels.forEach((label,index)=>{labelBoxes.set(label.dataset.link,boxes[index]);placeLinkLabel(label,Number(label.getAttribute("x")),Number(label.getAttribute("y")),geom)});
   }
 }
 // A long route can cross an unrelated card even with generous lane spacing.
-// Keep its enlarged glyph box in the nearest clear vertical gap. Geometry is
+// Keep its glyph box in the nearest clear vertical gap. Geometry is
 // cached: pointer frames never read SVG text or card layout again.
 function placeLinkLabel(label,x,y,geom){
-  const box=enlargedLabels&&labelBoxes.get(label.dataset.link);
+  const box=labelBoxes.get(label.dataset.link);
   if(box){
     x=Math.max(box.width/2+8,Math.min(geom.w-box.width/2-8,x));
-    const intervals=[...nodeRects.values()].filter(r=>x+box.width/2+4>r.left&&x-box.width/2-4<r.right).map(r=>({start:r.top-box.offset-box.height-4,end:r.bottom-box.offset+4})).sort((a,b)=>a.start-b.start);
-    const merged=[];for(const interval of intervals){const last=merged.at(-1);if(last&&interval.start<=last.end)last.end=Math.max(last.end,interval.end);else merged.push({...interval})}
+    const rects=[...nodeRects.values()],margin=box.margin;
+    // Only move an actually obscured glyph box; keep healthy labels untouched.
+    const obscured=rects.some(r=>x+box.width/2>r.left&&x-box.width/2<r.right&&y+box.offset<r.bottom&&y+box.offset+box.height>r.top);
+    const intervals=obscured?rects.filter(r=>x+box.width/2+margin>r.left&&x-box.width/2-margin<r.right).map(r=>({start:r.top-box.offset-box.height-margin,end:r.bottom-box.offset+margin})).sort((a,b)=>a.start-b.start):[];
+    const merged=[];for(const interval of intervals){const last=merged.at(-1);if(last&&interval.start<last.end)last.end=Math.max(last.end,interval.end);else merged.push({...interval})}
     const collision=merged.find(r=>y>r.start&&y<r.end);
     if(collision){
       const min=8-box.offset,max=geom.h-8-box.offset-box.height;
@@ -540,7 +543,7 @@ function moveNode(site){
   if(!node)return;
   const position=nodePoint(site,geom);
   node.style.left=`${position.left}px`;node.style.top=`${position.top}px`;
-  if(enlargedLabels)nodeRects.set(site.id,{left:position.left,right:position.left+nodeWidths.get(site.id),top:position.top,bottom:position.top+nodeHeights.get(site.id)});
+  nodeRects.set(site.id,{left:position.left,right:position.left+nodeWidths.get(site.id),top:position.top,bottom:position.top+nodeHeights.get(site.id)});
   for(const link of state.links){
     if(link.from!==site.id&&link.to!==site.id)continue;
     const other=state.sites.find(s=>s.id===(link.from===site.id?link.to:link.from));if(!other)continue;
