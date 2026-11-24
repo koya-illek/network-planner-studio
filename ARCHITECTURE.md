@@ -64,6 +64,19 @@ No project-data arrow returns to Cloudflare. Designs are processed and stored lo
 
 The browser UI calls the core functions directly, so a design is reviewed with the same engine that validates imports.
 
+## Form sizing and error recovery, 2026-11-24
+
+Site and VLAN forms keep native required and numeric constraints. Business-rule
+failures focus the affected field, associate the message with `aria-describedby`,
+and mark it with `aria-invalid`. Cross-field DHCP failures focus the error summary
+and describe both pool bounds. Editing or reopening clears stale custom error
+state without discarding entered data or permanent field hints.
+
+Editable controls inherit typography with a `1rem` minimum, including textareas.
+Form columns and actions can reflow with enlarged browser text. On narrow screens,
+the inspector is positioned within the topology view, not at a fixed assumed
+header offset, so a taller header cannot make it cover view navigation.
+
 ## Canonical data model
 
 The root schema identifier is `network-planner-studio/design`, version 3. The design contains:
@@ -160,6 +173,7 @@ One Cloudflare Worker serves `network.illek.ie` and the compatibility hostname `
 - Touch targets meet 44 px on coarse pointers; reduced-motion preferences disable decorative animation.
 - Canvas status is not colour-only: unhealthy sites carry a text flag and their accessible name names the severity, connection labels announce transport type and resilience in words, trace progress is a live region, and Escape clears the inspector selection.
 - On touch screens the canvas claims its gestures with `touch-action: none`, two-finger pinch zooms within the same clamped range as the zoom controls, and a cancelled or interrupted gesture aborts cleanly instead of leaving a stuck drag. A cancelled node drag also returns the site to its pre-drag position. Consecutive arrow-key nudges of one node record one undo entry; moving another node or using undo or redo starts a new history entry.
+- Diagram cards measure address/badge widths and wrapped heights in batches. Enlarged SVG glyph ascent determines lane clearance; route labels crossing unrelated cards use cached glyph/card geometry to move into the nearest clear vertical gap, without reducing text. Expanded cards pack around actual collisions; layout-only coordinates never rewrite saved positions. Canvas and view minimum heights grow together so the diagram cannot cover the footer. Short-name example geometry is unchanged at the default root font size; enlarged text and long names wrap without reducing font size. The site tree wraps network data and the toolbar reflows its groups. Hidden narrow-screen inspectors remain within their containing view rather than translating into a horizontal page-scroll area; visibility and pointer state keep the overlay closed without off-screen content.
 - The site-tree filter is a labelled search field; its match count is a polite live region, so narrowing a large design is announced without stealing focus.
 
 ## Non-goals

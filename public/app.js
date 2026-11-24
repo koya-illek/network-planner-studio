@@ -52,6 +52,8 @@ let canvasPan = {x:0,y:0};
 let panDrag = null;
 let canvasDirty = false;
 let nodeHeights = new Map();
+let nodeWidths = new Map();
+let nodeRects = new Map(), labelBoxes = new Map(), enlargedLabels = false;
 let nodePositions = new Map();
 let activePointers = new Map();
 let pinch = null;
@@ -409,6 +411,7 @@ function canvasGeometry(){
   return{w,h,nodeWidth:w<600?150:180};
 }
 function nodePoint(site,{w,h,nodeWidth}){
+  nodeWidth=nodeWidths.get(site.id)||nodeWidth;
   const nodeHeight=nodeHeights.get(site.id)||88;
   const placed=nodePositions.get(site.id);
   const left=Math.max(8,Math.min(w-nodeWidth-8,placed?.left??site.x/100*w)),top=Math.max(8,Math.min(h-nodeHeight-8,placed?.top??site.y/100*h));
@@ -426,7 +429,9 @@ function renderCanvas(){
   if($("#topology-view").hidden||$("#workspace").classList.contains("hidden")){canvasDirty=true;return}
   canvasDirty=false;
   nodePositions.clear();
+  nodeWidths.clear();
   $("#canvas").style.minHeight="";
+  $("#topology-view").style.minHeight="";
   const layer=$("#node-layer"),svg=$("#link-layer");
   let geom=canvasGeometry();
   layer.replaceChildren();svg.replaceChildren();
@@ -437,33 +442,94 @@ function renderCanvas(){
   for(const site of state.sites){
     const node=document.createElement("div"),position=nodePoint(site,geom),health=siteHealth(site);node.className=`topology-node role-${site.topologyRole||"standalone"} ${selected?.type==="site"&&selected.id===site.id?"selected":""}`;node.dataset.site=site.id;node.tabIndex=0;node.setAttribute("role","button");
     node.style.left=`${position.left}px`;node.style.top=`${position.top}px`;node.style.width=`${geom.nodeWidth}px`;
-    node.innerHTML=`<div class="node-head"><span class="node-icon">${site.topologyRole==="hub"?"HUB":TYPE_ICONS[site.type]||"ST"}</span><span class="node-copy"><strong>${escapeHtml(site.name)}</strong><small>${escapeHtml(site.cidr)} · ${escapeHtml(site.topologyRole||"standalone")}</small></span></div><div class="node-foot"><span><i class="health-dot ${health}"></i>${health?`<span class="health-flag ${health}">${health==="error"?"Errors":"Risks"}</span>`:""}${site.vlans.length} VLAN${site.vlans.length===1?"":"s"}</span><span>${site.devices} devices</span></div>`;
+    node.innerHTML=`<div class="node-head"><span class="node-icon">${site.topologyRole==="hub"?"HUB":TYPE_ICONS[site.type]||"ST"}</span><span class="node-copy"><strong>${escapeHtml(site.name)}</strong><small><span class="node-address">${escapeHtml(site.cidr)}</span> · ${escapeHtml(site.topologyRole||"standalone")}</small></span></div><div class="node-foot"><span><i class="health-dot ${health}"></i>${health?`<span class="health-flag ${health}">${health==="error"?"Errors":"Risks"}</span>`:""}${site.vlans.length} VLAN${site.vlans.length===1?"":"s"}</span><span>${site.devices} devices</span></div>`;
     node.setAttribute("aria-label",`${node.textContent}${health?`, ${healthWord(health)}`:""}`);
     layer.append(node);
   }
   // Read card sizes in one batch after the new contents are laid out. Cache
   // untransformed CSS heights so drag frames need no extra layout reads.
   const nodes=[...layer.children];
+  // Measure actual address and badge content at the user's font size. Keep the
+  // established compact geometry where its contents fit; never shrink text.
+  layer.dataset.measuring="";
+  const widths=nodes.map(node=>{
+    const address=node.querySelector(".node-address"),icon=node.querySelector(".node-icon");
+    const font=parseFloat(getComputedStyle(address).fontSize);
+    const content=address.scrollWidth+icon.offsetWidth+36;
+    return{width:Math.min(geom.w-16,Math.max(geom.nodeWidth,font>12?content:geom.nodeWidth)),expanded:font>12||node.querySelector("strong").scrollWidth>geom.nodeWidth};
+  });
+  delete layer.dataset.measuring;
+  nodes.forEach((node,index)=>{const {width,expanded}=widths[index];nodeWidths.set(node.dataset.site,width);node.classList.toggle("expanded-copy",expanded);node.style.width=`${width}px`});
   nodeHeights=new Map(nodes.map(node=>[node.dataset.site,node.offsetHeight]));
+  // SVG glyph ascent plus the existing label baseline offset determines the
+  // space needed between enlarged cards. Preserve compact default geometry.
+  const sample=document.createElementNS("http://www.w3.org/2000/svg","text");
+  sample.setAttribute("class","link-label");sample.textContent="VPN";svg.append(sample);
+  const glyph=sample.getBBox(),labelFont=parseFloat(getComputedStyle(sample).fontSize);
+  const clearance=labelFont>12?Math.max(16,Math.ceil(2*(Math.abs(glyph.y)+7)+16)):16;
+  sample.remove();enlargedLabels=labelFont>12;labelBoxes.clear();
   // Narrow diagrams use measured vertical lanes only where cards collide.
   // Positions are presentation-only: resizing never rewrites the saved model.
   if(geom.w<600){
     const ordered=state.sites.toSorted((a,b)=>a.y-b.y);
-    const needed=ordered.reduce((height,site)=>height+nodeHeights.get(site.id)+16,8);
+    const needed=ordered.reduce((height,site)=>height+nodeHeights.get(site.id)+clearance,8);
     if(needed>geom.h){$("#canvas").style.minHeight=`${needed}px`;geom=canvasGeometry();}
     let bottom=8;
-    for(const site of ordered){const point=nodePoint(site,geom);const top=Math.max(bottom,point.top);nodePositions.set(site.id,{left:point.left,top});bottom=top+nodeHeights.get(site.id)+16;}
+    for(const site of ordered){const point=nodePoint(site,geom);const top=Math.max(bottom,point.top);nodePositions.set(site.id,{left:point.left,top});bottom=top+nodeHeights.get(site.id)+clearance;}
     // If desired gaps ran past the last boundary, pack backwards from it.
     let end=geom.h-8;
-    for(const site of ordered.reverse()){const point=nodePositions.get(site.id);point.top=Math.min(point.top,end-nodeHeights.get(site.id));end=point.top-16;}
+    for(const site of ordered.reverse()){const point=nodePositions.get(site.id);point.top=Math.min(point.top,end-nodeHeights.get(site.id));end=point.top-clearance;}
   }
+  // Resolve expanded-card collisions without changing persisted coordinates.
+  // Compact diagrams retain their measured lanes above and normal-size wide
+  // diagrams retain their existing geometry exactly.
+  if(geom.w>=600){
+    const preferred=geom,placed=[];
+    let bottom=geom.h-8;
+    for(const site of state.sites.toSorted((a,b)=>a.y-b.y||a.x-b.x)){
+      const point=nodePoint(site,preferred),width=nodeWidths.get(site.id),height=nodeHeights.get(site.id);
+      let top=point.top;
+      for(const rect of placed){
+        if(point.left<rect.right+clearance&&point.left+width+clearance>rect.left&&top<rect.bottom+clearance&&top+height+clearance>rect.top)top=rect.bottom+clearance;
+      }
+      const rect={left:point.left,right:point.left+width,top,bottom:top+height};
+      let index=placed.findIndex(other=>other.top>top);if(index<0)index=placed.length;placed.splice(index,0,rect);
+      nodePositions.set(site.id,{left:point.left,top});bottom=Math.max(bottom,rect.bottom);
+    }
+    if(bottom+8>geom.h){$("#canvas").style.minHeight=`${bottom+8}px`;geom=canvasGeometry()}
+  }
+  if($("#canvas").style.minHeight)$("#topology-view").style.minHeight=`${$("#canvas").offsetHeight+$(".canvas-toolbar").offsetHeight}px`;
   svg.setAttribute("viewBox",`0 0 ${geom.w} ${geom.h}`);
   for(const node of nodes){const site=byId.get(node.dataset.site),point=nodePoint(site,geom);node.style.left=`${point.left}px`;node.style.top=`${point.top}px`;}
+  nodeRects=new Map(state.sites.map(site=>{const p=nodePoint(site,geom);return[site.id,{left:p.left,right:p.left+nodeWidths.get(site.id),top:p.top,bottom:p.top+nodeHeights.get(site.id)}]}));
   for(const link of state.links){
     const a=byId.get(link.from),b=byId.get(link.to);if(!a||!b)continue;
     const shape=linkGeometry(a,b,geom);
     svg.insertAdjacentHTML("beforeend",`<path id="route-${link.id}" d="${shape.d}" class="link ${link.resilience==="dual"?"dual":""}"/><path d="${shape.d}" class="link-hit" data-link="${link.id}" tabindex="0" role="button" aria-label="${escapeHtml(`${a.name} to ${b.name}: ${linkLabel(link).toLowerCase()}, ${link.resilience==="dual"?"dual logical paths":"single path"}`)}"/><text class="link-label" data-link="${link.id}" x="${shape.midX}" y="${shape.midY-7}" text-anchor="middle">${linkLabel(link)}</text>`);
   }
+  if(enlargedLabels){
+    const labels=[...svg.querySelectorAll(".link-label")];
+    const boxes=labels.map(label=>{const b=label.getBBox();return{width:b.width,height:b.height,offset:b.y-Number(label.getAttribute("y"))}});
+    labels.forEach((label,index)=>{labelBoxes.set(label.dataset.link,boxes[index]);placeLinkLabel(label,Number(label.getAttribute("x")),Number(label.getAttribute("y")),geom)});
+  }
+}
+// A long route can cross an unrelated card even with generous lane spacing.
+// Keep its enlarged glyph box in the nearest clear vertical gap. Geometry is
+// cached: pointer frames never read SVG text or card layout again.
+function placeLinkLabel(label,x,y,geom){
+  const box=enlargedLabels&&labelBoxes.get(label.dataset.link);
+  if(box){
+    x=Math.max(box.width/2+8,Math.min(geom.w-box.width/2-8,x));
+    const intervals=[...nodeRects.values()].filter(r=>x+box.width/2+4>r.left&&x-box.width/2-4<r.right).map(r=>({start:r.top-box.offset-box.height-4,end:r.bottom-box.offset+4})).sort((a,b)=>a.start-b.start);
+    const merged=[];for(const interval of intervals){const last=merged.at(-1);if(last&&interval.start<=last.end)last.end=Math.max(last.end,interval.end);else merged.push({...interval})}
+    const collision=merged.find(r=>y>r.start&&y<r.end);
+    if(collision){
+      const min=8-box.offset,max=geom.h-8-box.offset-box.height;
+      const choices=[collision.start,collision.end].filter(value=>value>=min&&value<=max);
+      if(choices.length)y=choices.reduce((best,value)=>Math.abs(value-y)<Math.abs(best-y)?value:best);
+    }
+  }
+  label.setAttribute("x",x);label.setAttribute("y",y);
 }
 // A drag or keyboard nudge moves exactly one node and its incident links.
 // Rebuilding every node and label per pointer frame made large imported
@@ -474,6 +540,7 @@ function moveNode(site){
   if(!node)return;
   const position=nodePoint(site,geom);
   node.style.left=`${position.left}px`;node.style.top=`${position.top}px`;
+  if(enlargedLabels)nodeRects.set(site.id,{left:position.left,right:position.left+nodeWidths.get(site.id),top:position.top,bottom:position.top+nodeHeights.get(site.id)});
   for(const link of state.links){
     if(link.from!==site.id&&link.to!==site.id)continue;
     const other=state.sites.find(s=>s.id===(link.from===site.id?link.to:link.from));if(!other)continue;
@@ -481,7 +548,7 @@ function moveNode(site){
     svg.querySelector(`path[id="route-${link.id}"]`)?.setAttribute("d",shape.d);
     svg.querySelector(`.link-hit[data-link="${link.id}"]`)?.setAttribute("d",shape.d);
     const label=svg.querySelector(`.link-label[data-link="${link.id}"]`);
-    if(label){label.setAttribute("x",shape.midX);label.setAttribute("y",shape.midY-7)}
+    if(label)placeLinkLabel(label,shape.midX,shape.midY-7,geom)
   }
 }
 // Health must not be a colour-only signal: the flag word reaches sighted
@@ -649,6 +716,39 @@ function duplicateProject(){
 }
 function newProject(){if(conflictProjectId===state.projectId)return showConflict();state=blankState();state.mode="new";selected=null;undoStack=[];redoStack=[];nudgeBurst={siteId:null,at:0};expandedSites.clear();saveState();$("#projects-dialog").close();enterWorkspace();render();openSiteDialog()}
 
+// Associate submit-time business errors with their fields without changing native constraints.
+const formValidation = new Map();
+function clearFormError(form){
+  const error=$(".form-error",form),fields=formValidation.get(form)||[];
+  for(const field of fields){
+    field.setAttribute("aria-invalid","false");
+    const descriptions=(field.getAttribute("aria-describedby")||"").split(/\s+/).filter(id=>id&&id!==error.id);
+    if(descriptions.length)field.setAttribute("aria-describedby",descriptions.join(" "));
+    else field.removeAttribute("aria-describedby");
+  }
+  error.textContent="";formValidation.delete(form);
+}
+function showFormError(form,error,fieldNames){
+  clearFormError(form);
+  const summary=$(".form-error",form);
+  const path=error.errors?.[0]?.path?.split(".").pop();
+  const names=path&&form.elements.namedItem(path)?[path]:fieldNames;
+  const fields=names.map(name=>form.elements.namedItem(name)).filter(field=>field instanceof HTMLElement&&!field.matches(":disabled,[type=hidden]")&&field.getClientRects().length&&getComputedStyle(field).visibility!=="hidden");
+  for(const field of fields){
+    field.setAttribute("aria-invalid","true");
+    const descriptions=new Set((field.getAttribute("aria-describedby")||"").split(/\s+/).filter(Boolean));
+    descriptions.add(summary.id);field.setAttribute("aria-describedby",[...descriptions].join(" "));
+  }
+  summary.textContent=error.message;formValidation.set(form,fields);
+  // Cross-field failures belong to the summary rather than an arbitrarily chosen field.
+  (fields.length===1?fields[0]:summary).focus();
+}
+for(const form of [$("#site-form"),$("#vlan-form")]){
+  form.addEventListener("input",()=>{if(formValidation.has(form))clearFormError(form)});
+  form.addEventListener("change",()=>{if(formValidation.has(form))clearFormError(form)});
+  form.addEventListener("reset",()=>clearFormError(form));
+}
+
 function openSiteDialog(siteId=null){
   editingSiteId=siteId;const form=$("#site-form");form.reset();form.elements.devices.value=50;
   const growth=form.elements.growth;growth.querySelector("option[data-dynamic-growth]")?.remove();growth.value=30;
@@ -792,25 +892,28 @@ $("#site-form").addEventListener("submit",e=>{
     if(editingSiteId){const site=state.sites.find(s=>s.id===editingSiteId),canonical=createSite({...site,name,type:fd.get("type"),devices,cidr,wan:fd.get("wan"),growth,topologyRole:fd.get("topologyRole"),internetBreakout:fd.get("internetBreakout"),notes:fd.get("notes").trim()});Object.assign(site,canonical,{id:site.id,hubId:site.hubId,x:site.x,y:site.y});selected={type:"site",id:site.id};showToast("Site updated")}
     else{const index=state.sites.length,stateSite=createSite({id:uid(),name,type:fd.get("type"),devices,cidr,wan:fd.get("wan"),growth,topologyRole:fd.get("topologyRole"),hubId:null,internetBreakout:fd.get("internetBreakout"),notes:fd.get("notes").trim(),x:12+(index%3)*31,y:18+Math.floor(index/3)*34,vlans:[]});state.sites.push(stateSite);selected={type:"site",id:stateSite.id};showToast("Site added. Add its existing or proposed VLANs next.")}
     editingSiteId=null;e.currentTarget.closest("dialog").close();touch();
-  }catch(err){$("#site-form-error").textContent=err.message}
+  }catch(err){showFormError(e.currentTarget,err,["cidr"])}
 });
 $("#vlan-form").addEventListener("submit",e=>{
-  e.preventDefault();const existing=editingVlanId&&findVlan(editingVlanId),site=existing?.site||state.sites.find(s=>s.id===e.currentTarget.elements.siteId.value);if(!site)return $("#vlan-form-error").textContent="The selected site no longer exists";const fd=new FormData(e.currentTarget);
-  const devices=+fd.get("devices"),vid=+fd.get("vid"),reserved=+fd.get("reserved");let cidr=fd.get("cidr").trim();
+  e.preventDefault();const existing=editingVlanId&&findVlan(editingVlanId),site=existing?.site||state.sites.find(s=>s.id===e.currentTarget.elements.siteId.value);if(!site)return showFormError(e.currentTarget,new Error("The selected site no longer exists"),[]);const fd=new FormData(e.currentTarget);
+  const devices=+fd.get("devices"),vid=+fd.get("vid"),reserved=+fd.get("reserved");let cidr=fd.get("cidr").trim(),errorFields=["vid"];
   try{
     const role=fd.get("role");if(site.vlans.some(v=>v.id!==editingVlanId&&v.vid===vid))throw new Error(`VLAN ${vid} is already used at ${site.name}`);
+    errorFields=["cidr"];
     if(!cidr)cidr=nextSubnet(site.cidr,prefixForDevices(devices,site.growth,reserved,{transit:role==="transit"}),site.vlans.filter(v=>v.id!==editingVlanId).map(v=>v.cidr));
     cidr=parseCidr(cidr,{allow31:role==="transit"}).cidr;if(!contains(site.cidr,cidr))throw new Error(`${cidr} is outside the site's ${site.cidr} allocation`);
     if(site.vlans.some(v=>v.id!==editingVlanId&&rangesOverlap(cidr,v.cidr)))throw new Error("This subnet overlaps another VLAN at the site");
     const dhcpEnabled=fd.get("dhcpEnabled")==="true",gateway=fd.get("gateway").trim()||firstUsable(cidr),automaticPool=defaultDhcpPool(cidr,reserved,{gateway}),dhcpStart=fd.get("dhcpStart").trim()||automaticPool.start,dhcpEnd=fd.get("dhcpEnd").trim()||automaticPool.end;
+    errorFields=["gateway"];
     if(!validateGateway(gateway,cidr,{transit:role==="transit"}))throw new Error("Gateway must be a usable host inside the VLAN subnet");
     const poolValidation=validateDhcpPool(cidr,gateway,reserved,{enabled:dhcpEnabled,start:dhcpStart,end:dhcpEnd});
+    errorFields=["dhcpStart","dhcpEnd"];
     if(!poolValidation.valid)throw new Error(poolValidation.errors[0]);
     pushHistory();
     const values=createVlan({id:editingVlanId||uid(),name:fd.get("name").trim(),vid,role,devices,cidr,gateway,dhcpEnabled,reserved,dhcpStart:dhcpEnabled?dhcpStart:"",dhcpEnd:dhcpEnabled?dhcpEnd:"",notes:fd.get("notes").trim(),siteCidr:site.cidr});
     let v;if(editingVlanId){v=existing.vlan;Object.assign(v,values);showToast(`${v.name} updated`)}else{v=values;site.vlans.push(v);showToast(`Added ${v.name} as ${v.cidr}`)}
     selected={type:"vlan",id:v.id};editingVlanId=null;e.currentTarget.closest("dialog").close();touch();
-  }catch(err){$("#vlan-form-error").textContent=err.message}
+  }catch(err){showFormError(e.currentTarget,err,errorFields)}
 });
 $("#connect-form").addEventListener("submit",e=>{
   e.preventDefault();const fd=new FormData(e.currentTarget),from=fd.get("from"),to=fd.get("to");
