@@ -218,3 +218,20 @@ textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(77,163,255,.2)
   .report-status.error{color:#8b1020}
   .report-sheet .context-label{color:#444}
 }
+
+/* Phone workspace keeps project identity and every destination in view. */
+@media(max-width:720px){
+  .topbar{height:auto;min-height:106px;grid-template-columns:minmax(0,1fr) auto;gap:6px 10px;padding-block:10px}
+  .brand{grid-column:1;grid-row:1}
+  .top-actions{grid-column:2;grid-row:1;position:static}
+  .project-title{display:flex;align-items:center;justify-content:space-between;gap:12px;grid-column:1 / -1;grid-row:2;text-align:left;min-inline-size:0}
+  .project-title .text-button{display:block;flex:1 1 0;min-inline-size:0;min-block-size:44px;overflow-wrap:anywhere;text-align:left;font-size:.875rem}
+  .save-state{display:block;flex:0 1 40%;font-size:.75rem;text-align:right;margin:0}
+  .view-tabs{display:flex;flex-wrap:wrap;height:auto;min-height:96px;overflow:visible;align-items:stretch;padding:0 8px}
+  .view-tabs button{flex:1 1 30%;white-space:normal;padding:10px 8px;min-height:48px}
+  .view#topology-view{height:calc(100dvh - 202px);min-height:500px}
+  .inspector{top:202px}
+  .canvas-shell{min-inline-size:0}
+}
+
+@media(min-width:721px) and (max-width:1050px){.canvas-toolbar{flex-wrap:wrap}.canvas-meta{flex:1 1 180px}.mode-group{flex:1 1 280px}}
