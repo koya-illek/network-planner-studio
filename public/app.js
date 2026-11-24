@@ -363,7 +363,7 @@ function activateView(view, moveFocus=false){
 function currentView(){return $(".view.active")?.id.replace("-view","")||"topology"}
 
 function renderSiteList(){
-  const root=$("#site-list");root.innerHTML="";
+  const root=$("#site-list");root.replaceChildren();
   // Beyond the expansion threshold the tree collapses to site rows: a
   // 1200-site import must not paste thousands of VLAN rows into the panel.
   // The filter searches everything regardless of collapse state.
@@ -429,7 +429,7 @@ function renderCanvas(){
   $("#canvas").style.minHeight="";
   const layer=$("#node-layer"),svg=$("#link-layer");
   let geom=canvasGeometry();
-  layer.innerHTML="";svg.innerHTML="";
+  layer.replaceChildren();svg.replaceChildren();
   svg.setAttribute("viewBox",`0 0 ${geom.w} ${geom.h}`);
   // Endpoint lookup through a Map: scanning every site per link endpoint
   // made dense topologies pay O(links x sites) per full pass.
@@ -448,7 +448,7 @@ function renderCanvas(){
   // Narrow diagrams use measured vertical lanes only where cards collide.
   // Positions are presentation-only: resizing never rewrites the saved model.
   if(geom.w<600){
-    const ordered=[...state.sites].sort((a,b)=>a.y-b.y);
+    const ordered=state.sites.toSorted((a,b)=>a.y-b.y);
     const needed=ordered.reduce((height,site)=>height+nodeHeights.get(site.id)+16,8);
     if(needed>geom.h){$("#canvas").style.minHeight=`${needed}px`;geom=canvasGeometry();}
     let bottom=8;
@@ -676,7 +676,7 @@ function openConnectDialog(fromId,linkId=null){
   $("#connect-form-error").textContent="";$("#connect-dialog").showModal();
 }
 function busiestHub(){
-  return [...state.sites].sort((a,b)=>connectionsFor(b.id)-connectionsFor(a.id)||b.vlans.length-a.vlans.length)[0];
+  return state.sites.toSorted((a,b)=>connectionsFor(b.id)-connectionsFor(a.id)||b.vlans.length-a.vlans.length)[0];
 }
 // The planning heuristics live in the core model; this dialog only layers
 // workspace intent (naming, connection, canvas placement) onto the plan.
