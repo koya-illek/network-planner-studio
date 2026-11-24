@@ -147,12 +147,12 @@
       <div id="addressing-view" class="view" role="tabpanel" aria-labelledby="tab-addressing" tabindex="0">
         <section class="page-view">
           <div class="page-heading">
-            <div><h2>IPv4 address plan</h2><p>Generic IPv4 capacities. Verify cloud-provider reservations and managed DHCP rules separately.</p></div>
+            <div><h2 id="address-plan-title">IPv4 address plan</h2><p>Generic IPv4 capacities. Verify cloud-provider reservations and managed DHCP rules separately.</p></div>
             <div><button class="button ghost" id="csv-export" type="button">Export CSV</button> <button class="button primary" id="add-vlan-address" type="button">+ Add VLAN</button></div>
           </div>
           <div id="address-summary" class="summary-grid"></div>
           <div class="address-filter-row"><input id="address-filter" type="search" placeholder="Filter rows…" aria-label="Filter address plan rows by site, VLAN name, ID, subnet or role" autocomplete="off"><p id="address-filter-count" role="status"></p></div>
-          <div class="table-card">
+          <div class="table-card" tabindex="0" role="region" aria-labelledby="address-plan-title">
             <table>
               <thead><tr><th scope="col">Site / network</th><th scope="col">VLAN</th><th scope="col">IPv4 prefix</th><th scope="col">Gateway</th><th scope="col">Needed</th><th scope="col">Usable</th><th scope="col">Headroom</th><th scope="col">Status</th></tr></thead>
               <tbody id="address-table"></tbody>
@@ -174,8 +174,8 @@
 
       <div id="policy-view" class="view" role="tabpanel" aria-labelledby="tab-policy" tabindex="0">
         <section class="page-view">
-          <div class="page-heading"><div><h2>Traffic policy</h2><p>Define the intended relationship between VLAN roles. Click a cell to cycle allow, restricted and deny.</p></div></div>
-          <div id="flow-matrix" class="table-card flow-matrix"></div>
+          <div class="page-heading"><div><h2 id="traffic-policy-title">Traffic policy</h2><p>Define the intended relationship between VLAN roles. Click a cell to cycle allow, restricted and deny.</p></div></div>
+          <div id="flow-matrix" class="table-card flow-matrix" tabindex="0" role="region" aria-labelledby="traffic-policy-title"></div>
         </section>
       </div>
 

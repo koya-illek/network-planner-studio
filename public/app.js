@@ -1,7 +1,7 @@
+import {createPersistence,DRAFT_PREFIX} from "./persistence.js";
+import {STORAGE_KEY,LIBRARY_KEY,createLegacyBridge,isLegacyKey} from "./storage-generation.js";
 import {SCHEMA_ID,SCHEMA_VERSION,ENUMS,DESIGN_MAX_SITES,DesignValidationError,exampleDesign,parseCidr,parseRoutePrefix,rangesOverlap,contains,firstUsable,endpointCapacity,defaultDhcpPool,validateGateway,validateDhcpPool,prefixForDevices,nextSubnet,nextAvailableVlanId,suggestSiteRange as suggestSiteRangeCore,recommendSitePlan as recommendSitePlanCore,recommendVlanPlan as recommendVlanPlanCore,reviewDesignIssues,designScore,defaultFlowPolicy,guardCsvCell,unguardCsvCell,parseCsvRows,shortestPath,migrateDesign,createSite,createVlan,createLink} from "./network-core.js";
 
-const STORAGE_KEY = "network-planner-studio.v1";
-const LIBRARY_KEY = "network-planner-studio.projects.v1";
 const IMPORT_MAX_BYTES = 10 * 1024 * 1024;
 const LIBRARY_IMPORT_MAX_BYTES = 64 * 1024 * 1024;
 const prefersReducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
@@ -13,8 +13,9 @@ const uid = () => crypto.randomUUID();
 
 let storageIssue = "";
 function storageGet(key) {
+  storageGet.failed=false;
   try { return localStorage.getItem(key); }
-  catch { storageIssue = "Browser storage is unavailable. Export a recovery copy before leaving this page."; return null; }
+  catch { storageGet.failed=true;storageIssue = "Browser storage is unavailable. Export a recovery copy before leaving this page."; return null; }
 }
 function storageSet(key, value) {
   try { localStorage.setItem(key, value); return true; }
@@ -22,6 +23,20 @@ function storageSet(key, value) {
 }
 let state = loadState() || blankState();
 let conflictProjectId = null;
+const persistence=createPersistence({
+  storage:{get length(){return localStorage.length},key:index=>localStorage.key(index),getItem:key=>localStorage.getItem(key),setItem:(key,value)=>localStorage.setItem(key,value),removeItem:key=>localStorage.removeItem(key)},
+  locks:navigator.locks,readLibrary:loadLibrary,
+  writeLibrary:library=>storageSet(LIBRARY_KEY,JSON.stringify(library)),
+  writeActive:design=>storageSet(STORAGE_KEY,JSON.stringify(design)),
+  validate:raw=>migrateDesign(raw,{strict:true}),currentId:()=>state.projectId,
+  onStatus:text=>{$("#save-state").textContent=text},
+  onConflict:design=>{if(design.projectId===state.projectId)showConflict()},
+  onRecovery:renderRecovery
+});
+const savedProjectSnapshots=persistence.observed;
+const initialLibrary=loadLibrary();
+persistence.observe(state.projectId,JSON.stringify(initialLibrary[state.projectId]??null));
+const initialConflict=initialLibrary[state.projectId]&&designFingerprint(initialLibrary[state.projectId])!==designFingerprint(state);
 let selected = null;
 let currentTool = "select";
 let drag = null;
@@ -36,6 +51,7 @@ let canvasZoom = 1;
 let canvasPan = {x:0,y:0};
 let panDrag = null;
 let canvasDirty = false;
+let nodeHeights = new Map();
 let activePointers = new Map();
 let pinch = null;
 let nudgeBurst = {siteId:null,at:0};
@@ -56,11 +72,15 @@ function suggestSiteRange(devices=50){
 // An unreadable stored blob is quarantined before any later save can overwrite
 // it, so one corrupt byte can no longer erase the whole local library.
 function quarantineStorage(key){
-  try{const raw=localStorage.getItem(key);if(raw!=null)localStorage.setItem(`${key}.unreadable`,raw)}catch{}
+  try{const raw=localStorage.getItem(key);if(raw!=null)localStorage.setItem(`${key}.unreadable`,raw);return true}catch{return false}
 }
-function loadState(){try{const value=JSON.parse(storageGet(STORAGE_KEY));return value?migrateDesign(value,{strict:false}):null}catch(error){quarantineStorage(STORAGE_KEY);storageIssue="The saved design could not be read. The raw copy was kept under network-planner-studio.v1.unreadable. Start a new design or import a recovery copy.";showToast(storageIssue);return null}}
-function loadLibrary(){try{const value=JSON.parse(storageGet(LIBRARY_KEY));return value&&typeof value==="object"?value:{}}catch{quarantineStorage(LIBRARY_KEY);storageIssue="The local project library could not be read. The raw copy was kept under network-planner-studio.projects.v1.unreadable. Export current work before continuing.";showToast(storageIssue);return{}}}
+function loadState(){try{const value=JSON.parse(storageGet(STORAGE_KEY));return value?migrateDesign(value,{strict:false}):null}catch(error){quarantineStorage(STORAGE_KEY);storageIssue="The saved design could not be read. The raw copy was kept under network-planner-studio.v2.unreadable. Start a new design or import a recovery copy.";showToast(storageIssue);return null}}
+function loadLibrary(){loadLibrary.recovered=false;loadLibrary.unavailable=false;try{const raw=storageGet(LIBRARY_KEY);if(storageGet.failed){loadLibrary.unavailable=true;return Object.create(null)}const value=JSON.parse(raw);if(value===null)return Object.create(null);if(typeof value!=="object"||Array.isArray(value))throw new Error("Invalid library");return Object.assign(Object.create(null),value)}catch{const kept=quarantineStorage(LIBRARY_KEY);loadLibrary.recovered=kept;loadLibrary.unavailable=!kept;storageIssue=kept?"The local project library could not be read. The raw copy was kept under network-planner-studio.projects.v2.unreadable. Export current work before continuing.":"The library could not be read or quarantined. It has not been replaced. Export a recovery copy before continuing.";showToast(storageIssue);return Object.create(null)}}
+function hasDirtyDesign(){
+  try{return designFingerprint(state)!==designFingerprint(JSON.parse(savedProjectSnapshots.get(state.projectId)))}catch{return true}
+}
 function showConflict(){
+  if(hasDirtyDesign()||persistence.pendingDocument(state.projectId))persistence.protect(state);
   conflictProjectId=state.projectId;
   clearTimeout(touch.timer);touch.timer=null;
   $("#save-state").textContent="Conflict · autosave paused";
@@ -74,23 +94,113 @@ function showConflict(){
       if(action==="export"){exportDesign();return}
       if(action==="reload"){
         const latest=loadLibrary()[state.projectId];if(!latest)return showToast("Latest design unavailable; export your version first.");
+        persistence.discardOwn(state.projectId);persistence.observe(state.projectId,JSON.stringify(latest));
         state=reviveDesign(latest);undoStack=[];redoStack=[];selected=null;
-      }else{state={...state,projectId:uid(),name:`${state.name} copy`}}
-      conflictProjectId=null;panel.remove();saveState();enterWorkspace();render();
+      }else{const recovery=persistence.ownDraft(state.projectId);state={...state,projectId:uid(),name:`${state.name} copy`};state.recoveryDraft=recovery}
+      const recovery=state.recoveryDraft;delete state.recoveryDraft;
+      conflictProjectId=null;panel.remove();saveState({recovery});enterWorkspace();render();
     });
     document.body.append(panel);
   }
   showToast("This design changed in another browser tab. Autosave paused; choose a recovery action.");
 }
-function saveState(){
+let recoveryRows=[];
+function downloadRecovery(row){
+  const blob=new Blob([row.document?JSON.stringify(row.document,null,2):row.raw],{type:"application/json"});
+  const link=document.createElement("a");link.href=URL.createObjectURL(blob);link.download="network-planner-recovery.json";link.click();setTimeout(()=>URL.revokeObjectURL(link.href),1000);
+}
+function renderRecovery(rows){
+  recoveryRows=rows;
+  let panel=$("#storage-recovery");
+  if(!rows.length){panel?.remove();return}
+  if(!panel){
+    panel=document.createElement("section");panel.id="storage-recovery";panel.className="storage-recovery";panel.setAttribute("aria-labelledby","storage-recovery-title");
+    panel.addEventListener("click",event=>{
+      const button=event.target.closest("[data-recovery]");if(!button)return;
+      const row=recoveryRows[Number(button.dataset.index)];if(!row)return;
+      try{
+        if(button.dataset.recovery==="download")return downloadRecovery(row);
+        if(button.dataset.recovery==="discard"){
+          if(confirm("Discard this recovery draft? Download it first if you may need it."))persistence.discard(row.key,row.raw);
+          return;
+        }
+        if(!row.document)return;
+        // Preserve the current design before switching to a recovered copy.
+        if(!retainCurrentForSwitch())throw new Error("Export your current edits before opening a recovery copy. They could not be saved.");
+        state={...reviveDesign(row.document),projectId:uid(),name:`${row.document.name} recovered copy`};
+        conflictProjectId=null;$("#storage-conflict")?.remove();persistence.observe(state.projectId,"null");
+        selected=null;undoStack=[];redoStack=[];saveState({recovery:{key:row.key,raw:row.raw}});enterWorkspace();render();
+      }catch(error){showToast(error.message)}
+    });
+    $(".topbar").after(panel);
+  }
+  panel.innerHTML=`<h2 id="storage-recovery-title">Unfinished local saves</h2><p>Another tab may still be saving. Review these copies before recovering or discarding them.</p><ul>${rows.map((row,index)=>`<li><strong>${escapeHtml(row.document?.name||"Unreadable recovery draft")}</strong>${row.error?`<p>${escapeHtml(row.error)}</p>`:""}<div>${row.document?`<button class="button" data-recovery="recover" data-index="${index}" type="button">Recover as copy</button>`:""} <button class="button ghost" data-recovery="download" data-index="${index}" type="button">Download recovery</button> <button class="button ghost" data-recovery="discard" data-index="${index}" type="button">Discard draft</button></div></li>`).join("")}</ul>`;
+}
+function saveState(options={}){
   if(conflictProjectId===state.projectId){showConflict();return false}
   if(conflictProjectId){conflictProjectId=null;$("#storage-conflict")?.remove()}
-  state.updatedAt=new Date().toISOString();
-  const saved=storageSet(STORAGE_KEY,JSON.stringify(state));
-  const library=loadLibrary();library[state.projectId]=state;
-  const librarySaved=storageSet(LIBRARY_KEY,JSON.stringify(library));
-  $("#save-state").textContent=saved&&librarySaved?"Saved locally":"Storage needs recovery";
-  if(!saved||!librarySaved) showToast(storageIssue);
+  if(persistence.hasRecovery(state.projectId)&&(!persistence.pendingDocument(state.projectId)||persistence.isBlocked(state.projectId))){
+    if(hasDirtyDesign())persistence.protect(state);
+    $("#save-state").textContent="Recovery copies need review";persistence.notifyRecovery();return false;
+  }
+  if(JSON.stringify(state)!==savedProjectSnapshots.get(state.projectId))state.updatedAt=new Date().toISOString();
+  const promise=persistence.enqueue(state,options);
+  void promise.then(result=>{
+    if(result.error)showToast(result.error.message||"Storage needs recovery. Export your current design.");
+    if($("#projects-dialog")?.open)renderProjectLibrary();
+  });
+  return promise;
+}
+// A navigation must not strand edits that exist only in the current editor.
+function retainCurrentForSwitch(){
+  if(!state.mode&&!state.sites.length&&!state.links.length&&state.name==="Untitled network"&&!state.assumptions.length)return true;
+  saveState();
+  const own=persistence.ownDraft(state.projectId),pending=persistence.pendingDocument(state.projectId);
+  let retained=null;
+  if(own&&storageGet(own.key)===own.raw)retained=pending;
+  if(!retained){const library=loadLibrary();if(!loadLibrary.unavailable)retained=library[state.projectId]}
+  return !!retained&&designFingerprint(retained)===designFingerprint(state);
+}
+// Previous clients keep their own slots. Only an explicit import crosses the
+// generation boundary; legacy storage is never changed or deleted here.
+// Import jobs use a separate writer identity so an in-flight legacy snapshot
+// can never replace the current editor's newer pending journal for that copy.
+const legacyImporter=createPersistence({
+  storage:{get length(){return localStorage.length},key:index=>localStorage.key(index),getItem:key=>localStorage.getItem(key),setItem:(key,value)=>localStorage.setItem(key,value),removeItem:key=>localStorage.removeItem(key)},
+  locks:navigator.locks,readLibrary:loadLibrary,writeLibrary:library=>storageSet(LIBRARY_KEY,JSON.stringify(library)),
+  writeActive:()=>true,validate:raw=>migrateDesign(raw,{strict:true}),currentId:()=>null,onRecovery:()=>persistence.notifyRecovery()
+});
+const legacy=createLegacyBridge({storage:{get length(){return localStorage.length},key:index=>localStorage.key(index),getItem:key=>localStorage.getItem(key)},persistence:legacyImporter,validate:raw=>migrateDesign(raw,{strict:true})});
+let legacyRows=[],legacyGeneration=0;
+async function refreshLegacy(){
+  const generation=++legacyGeneration,rows=await legacy.rows();if(generation!==legacyGeneration)return;
+  legacyRows=rows;let panel=$("#storage-legacy");if(!rows.length){panel?.remove();return}
+  if(!panel){
+    panel=document.createElement("section");panel.id="storage-legacy";panel.className="storage-recovery";panel.setAttribute("aria-labelledby","storage-legacy-title");
+    panel.addEventListener("click",async event=>{
+      const button=event.target.closest("[data-legacy]");if(!button)return;
+      const row=legacyRows[Number(button.dataset.index)];if(!row)return;
+      if(button.dataset.legacy==="download")return downloadRecovery({raw:row.raw});
+      button.disabled=true;const openingFrom=state.projectId;
+      try{
+        const document=await legacy.importCopy(row);
+        if(state.projectId===document.projectId){showToast("This imported copy is already open. Current edits have been kept.");return}
+        if(state.projectId!==openingFrom){showToast("Previous-version copy imported. Open it from Projects.");return}
+        // An edit form belongs to its current design even before submission.
+        if($("dialog[open]")){
+          if($("#projects-dialog").open)renderProjectLibrary();
+          showToast("Copy imported. Finish the open dialog, then open it from Projects.");return;
+        }
+        if(!retainCurrentForSwitch())throw new Error("The copy was imported, but current edits need export before switching designs.");
+        const pendingCopy=persistence.pendingDocument(document.projectId);state=reviveDesign(pendingCopy||document);conflictProjectId=null;$("#storage-conflict")?.remove();
+        if(!pendingCopy)persistence.observe(state.projectId,JSON.stringify(document));selected=null;undoStack=[];redoStack=[];expandedSites.clear();saveState();enterWorkspace();render();
+        showToast("Previous-version copy opened. The original has not been changed.");
+      }catch(error){showToast(error.message)}finally{button.disabled=false;void refreshLegacy()}
+    });
+    $(".topbar").after(panel);
+  }
+  const library=loadLibrary();
+  panel.innerHTML=`<h2 id="storage-legacy-title">Previous-version designs</h2><p>Older tabs save separately. Import a copy to continue here; originals stay available in the previous version. Later changes there appear as separate copies.</p><ul>${rows.map((row,index)=>`<li><strong>${escapeHtml(row.document?.name||row.label)}</strong><p>${escapeHtml(row.error||row.label)}</p><div>${row.document?`<button class="button" data-legacy="import" data-index="${index}" type="button">${Object.prototype.hasOwnProperty.call(library,row.targetId)?"Open imported copy":"Import copy"}</button>`:""} ${row.raw!==null?`<button class="button ghost" data-legacy="download" data-index="${index}" type="button">Download previous version</button>`:""}</div></li>`).join("")}</ul>`;
 }
 // History entries hold whole-design snapshots. Without a ceiling, a large
 // imported design multiplied by forty entries pins tens of megabytes of
@@ -211,7 +321,7 @@ function render(){
   stopTrace();
   reviewCache=null;
   $("#project-name-button").textContent=state.name;
-  renderSiteList();renderCanvas();renderInspector();renderReviewBadge();
+  renderSiteList();renderInspector();renderReviewBadge();
   const vlanCount=state.sites.reduce((n,s)=>n+s.vlans.length,0);
   const addressCount=state.sites.reduce((n,s)=>n+s.vlans.reduce((sum,v)=>sum+(safeCapacity(v)||0),0),0);
   $("#site-total").textContent=`${state.sites.length} site${state.sites.length===1?"":"s"}`;
@@ -220,6 +330,9 @@ function render(){
   $("#topology-mode").textContent=state.topologyMode==="hub-spoke"?"Hub & spoke":state.topologyMode==="mesh"?"Mesh":"Custom";
   updateHistoryButtons();
   $("#empty-canvas").classList.toggle("hidden",state.sites.length>0);
+  // Toolbar metadata can reflow now that its text is readable; measure the
+  // canvas only after those labels have their final contents.
+  renderCanvas();
   // Hidden tabs hold the heaviest DOM in the app (address table, report
   // sheets); at imported scale rebuilding them per edit froze the canvas.
   // They are marked stale here and built when their tab activates.
@@ -295,7 +408,8 @@ function canvasGeometry(){
   return{w,h,nodeWidth:w<600?150:180};
 }
 function nodePoint(site,{w,h,nodeWidth}){
-  const left=Math.max(8,Math.min(w-nodeWidth-8,site.x/100*w)),top=Math.max(8,Math.min(h-88,site.y/100*h));
+  const nodeHeight=nodeHeights.get(site.id)||88;
+  const left=Math.max(8,Math.min(w-nodeWidth-8,site.x/100*w)),top=Math.max(8,Math.min(h-nodeHeight-8,site.y/100*h));
   return{left,top,x:left+nodeWidth/2,y:top+35};
 }
 function linkGeometry(a,b,geom){
@@ -315,16 +429,21 @@ function renderCanvas(){
   // Endpoint lookup through a Map: scanning every site per link endpoint
   // made dense topologies pay O(links x sites) per full pass.
   const byId=new Map(state.sites.map(s=>[s.id,s]));
-  for(const link of state.links){
-    const a=byId.get(link.from),b=byId.get(link.to);if(!a||!b)continue;
-    const shape=linkGeometry(a,b,geom);
-    svg.insertAdjacentHTML("beforeend",`<path id="route-${link.id}" d="${shape.d}" class="link ${link.resilience==="dual"?"dual":""}"/><path d="${shape.d}" class="link-hit" data-link="${link.id}" tabindex="0" role="button" aria-label="${escapeHtml(`${a.name} to ${b.name}: ${linkLabel(link).toLowerCase()}, ${link.resilience==="dual"?"dual logical paths":"single path"}`)}"/><text class="link-label" data-link="${link.id}" x="${shape.midX}" y="${shape.midY-7}" text-anchor="middle">${linkLabel(link)}</text>`);
-  }
   for(const site of state.sites){
     const node=document.createElement("div"),position=nodePoint(site,geom),health=siteHealth(site);node.className=`topology-node role-${site.topologyRole||"standalone"} ${selected?.type==="site"&&selected.id===site.id?"selected":""}`;node.dataset.site=site.id;node.tabIndex=0;node.setAttribute("role","button");node.setAttribute("aria-label",`${site.name}, ${site.topologyRole||"standalone"} site, ${site.cidr}${health?`, ${healthWord(health)}`:""}`);
     node.style.left=`${position.left}px`;node.style.top=`${position.top}px`;node.style.width=`${geom.nodeWidth}px`;
     node.innerHTML=`<div class="node-head"><span class="node-icon">${site.topologyRole==="hub"?"HUB":TYPE_ICONS[site.type]||"ST"}</span><span class="node-copy"><strong>${escapeHtml(site.name)}</strong><small>${escapeHtml(site.cidr)} · ${escapeHtml(site.topologyRole||"standalone")}</small></span></div><div class="node-foot"><span><i class="health-dot ${health}"></i>${health?`<span class="health-flag ${health}">${health==="error"?"Errors":"Risks"}</span>`:""}${site.vlans.length} VLAN${site.vlans.length===1?"":"s"}</span><span>${site.devices} devices</span></div>`;
     layer.append(node);
+  }
+  // Read card sizes in one batch after the new contents are laid out. Cache
+  // untransformed CSS heights so drag frames need no extra layout reads.
+  const nodes=[...layer.children];
+  nodeHeights=new Map(nodes.map(node=>[node.dataset.site,node.offsetHeight]));
+  for(const node of nodes){const site=byId.get(node.dataset.site);node.style.top=`${nodePoint(site,geom).top}px`;}
+  for(const link of state.links){
+    const a=byId.get(link.from),b=byId.get(link.to);if(!a||!b)continue;
+    const shape=linkGeometry(a,b,geom);
+    svg.insertAdjacentHTML("beforeend",`<path id="route-${link.id}" d="${shape.d}" class="link ${link.resilience==="dual"?"dual":""}"/><path d="${shape.d}" class="link-hit" data-link="${link.id}" tabindex="0" role="button" aria-label="${escapeHtml(`${a.name} to ${b.name}: ${linkLabel(link).toLowerCase()}, ${link.resilience==="dual"?"dual logical paths":"single path"}`)}"/><text class="link-label" data-link="${link.id}" x="${shape.midX}" y="${shape.midY-7}" text-anchor="middle">${linkLabel(link)}</text>`);
   }
 }
 // A drag or keyboard nudge moves exactly one node and its incident links.
@@ -446,13 +565,15 @@ function renderReviewBadge(){
 function renderReviewPanel(){
   const issues=reviewDesign(),errors=issues.filter(i=>i.severity==="error").length,warnings=issues.filter(i=>i.severity==="warning").length;
   const score=designScore(issues);
-  $("#review-score").innerHTML=`<div class="score-ring" role="img" aria-label="Design score ${score} out of 100">${score}</div><div><h2>${errors?`${errors} blocking issue${errors===1?"":"s"} found`:warnings?`${warnings} design risk${warnings===1?"":"s"} to review`:"The foundations look healthy"}</h2><p>${errors?"Resolve address conflicts before implementation or connecting sites.":"Recommendations remain editable; document intentional exceptions."}</p></div>`;
-  const assumptions=(state.assumptions||[]).map(message=>({severity:"info",title:"Design assumption",message}));
+  const recommendations=issues.filter(i=>i.severity==="advice").length,notes=issues.filter(i=>i.severity==="info").length,assumptionCount=(state.assumptions||[]).length;
+  const summary=[`${errors+warnings} risk${errors+warnings===1?"":"s"}`,`${recommendations} recommendation${recommendations===1?"":"s"}`,`${notes} note${notes===1?"":"s"}`,`${assumptionCount} assumption${assumptionCount===1?"":"s"}`].join(" · ");
+  $("#review-score").innerHTML=`<div class="score-ring" role="img" aria-label="Design score ${score} out of 100">${score}</div><div><h2>${errors?`${errors} blocking issue${errors===1?"":"s"} found`:warnings?`${warnings} design risk${warnings===1?"":"s"} to review`:"The foundations look healthy"}</h2><p>${errors?"Resolve address conflicts before implementation or connecting sites.":"Recommendations remain editable; document intentional exceptions."}</p><p class="review-summary">${summary}</p></div>`;
+  const assumptions=(state.assumptions||[]).map(message=>({severity:"info",kind:"assumption",title:"Design assumption",message}));
   $("#review-list").innerHTML=[...issues,...assumptions].map(i=>{
     // Findings that point at a site can jump straight to it: a review is a
     // to-do list, not just prose.
     const site=i.siteId&&state.sites.find(s=>s.id===i.siteId);
-    return `<article class="review-item ${i.severity}"><span class="review-icon">${i.severity==="error"?"!":i.severity==="warning"?"△":"✓"}</span><div><h3>${escapeHtml(i.title)}</h3><p>${escapeHtml(i.message)}</p></div><div class="review-side"><small>${i.severity}</small>${site?`<button class="button ghost review-locate" data-review-goto="${site.id}" type="button" aria-label="Show ${escapeHtml(site.name)} on the topology canvas">Locate</button>`:""}</div></article>`
+    return `<article class="review-item ${i.severity}"><span class="review-icon">${i.severity==="warning"?'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 22 21H2Z M12 9v5 M12 18h.01"/></svg>':'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6 M12 7h.01"/></svg>'}</span><div><h3>${escapeHtml(i.title)}</h3><p>${escapeHtml(i.message)}</p></div><div class="review-side"><small>${i.kind==="assumption"?"Assumption":i.severity==="advice"?"Recommendation":i.severity==="info"?"Note":i.severity==="error"?"Blocking issue":"Risk"}</small>${site?`<button class="button ghost review-locate" data-review-goto="${site.id}" type="button" aria-label="Show ${escapeHtml(site.name)} on the topology canvas">Locate</button>`:""}</div></article>`
   }).join("");
 }
 function renderTrafficPolicy(){
@@ -471,25 +592,36 @@ function renderReport(){
   root.innerHTML=`<article class="report-sheet">
     <p>Generic IPv4 planning model. Verify cloud-provider address reservations and managed DHCP rules separately. Routes and traffic policies describe design intent; live configuration and reachability are not tested.</p>
     <header class="report-header"><div><p class="context-label">IPv4 network design</p><h2>${escapeHtml(state.name)}</h2><p>Generated ${new Date().toLocaleString()} · ${escapeHtml(state.topologyMode)}</p></div><div class="report-status ${blocking?"error":risks?"warning":""}">${blocking?`${blocking} blocking issue${blocking===1?"":"s"}`:risks?`${risks} risk${risks===1?"":"s"} to accept`:"Ready for technical review"}</div></header>
-    <div class="report-kpis">${[["Sites",state.sites.length],["VLANs",vlans.length],["WAN links",state.links.length],["Schema",`${SCHEMA_ID} v${SCHEMA_VERSION}`]].map(([label,value])=>`<div class="report-kpi"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("")}</div>
-    <section class="report-section" tabindex="0"><h3>Site and address plan</h3><table><thead><tr><th scope="col">Site</th><th scope="col">Role</th><th scope="col">Site range</th><th scope="col">VLAN</th><th scope="col">Subnet and gateway</th><th scope="col">DHCP pool</th><th scope="col">Reserved</th><th scope="col">Devices</th></tr></thead><tbody>${vlans.length?vlans.map(({site,vlan:v})=>`<tr><td>${escapeHtml(site.name)}</td><td>${escapeHtml(site.topologyRole)}</td><td><code>${escapeHtml(site.cidr)}</code></td><td>${v.vid} · ${escapeHtml(v.name)}</td><td><code>${escapeHtml(v.cidr)}</code><br><small>${escapeHtml(v.gateway)}</small></td><td>${v.dhcpEnabled?`<code>${escapeHtml(v.dhcpStart)}</code><br><small>to ${escapeHtml(v.dhcpEnd)}</small>`:"Static"}</td><td>${v.reserved}</td><td>${v.devices}</td></tr>`).join(""):`<tr><td colspan="8">No VLANs defined.</td></tr>`}</tbody></table></section>
-    <section class="report-section" tabindex="0"><h3>WAN and routing intent</h3><p>Link paths describe logical connectivity, not verified circuit independence. Dual paths can share a site WAN dependency.</p><table><thead><tr><th scope="col">Connection</th><th scope="col">Transport</th><th scope="col">Link paths</th><th scope="col">Routing</th><th scope="col">Transit</th><th scope="col">Prefixes and default</th><th scope="col">Notes</th></tr></thead><tbody>${state.links.length?state.links.map(l=>`<tr><td>${escapeHtml(siteName(l.from))} to ${escapeHtml(siteName(l.to))}</td><td>${escapeHtml(linkLabel(l))}</td><td>${l.resilience==="dual"?"Dual logical paths":"Single path"}</td><td>${escapeHtml(l.routingType)}</td><td>${l.transitAllowed===false?"denied":"allowed"}</td><td>${(l.advertisedPrefixes||[]).map(escapeHtml).join(", ")||"Learned dynamically"}${l.defaultRoute?"; default 0.0.0.0/0":""}</td><td>${escapeHtml(l.notes||"Not documented")}</td></tr>`).join(""):`<tr><td colspan="7">No WAN links defined.</td></tr>`}</tbody></table></section>
-    <section class="report-section" tabindex="0"><h3>Breakout, hub assignments and inspection</h3><table><thead><tr><th scope="col">Site</th><th scope="col">Topology role</th><th scope="col">Assigned hub</th><th scope="col">Internet breakout</th><th scope="col">Inspection intent</th></tr></thead><tbody>${breakoutRows||`<tr><td colspan="5">No sites defined.</td></tr>`}</tbody></table></section>
-    <section class="report-section" tabindex="0"><h3>Traffic policy matrix</h3><table><thead><tr><th scope="col">Source role</th><th scope="col">Destination role</th><th scope="col">Action</th><th scope="col">Rationale</th></tr></thead><tbody>${policyRows||`<tr><td colspan="4">${roles.length?"A single VLAN role has no cross-zone flows to govern.":"No VLAN roles defined."}</td></tr>`}</tbody></table><p>Policy values describe intended trust boundaries. They are not device configuration.</p></section>
-    <section class="report-section" tabindex="0"><h3>Assumptions and unresolved decisions</h3>${state.assumptions?.length?`<ul>${state.assumptions.map(a=>`<li>${escapeHtml(a)}</li>`).join("")}</ul>`:"<p>No assumptions documented.</p>"}${unresolved.length?`<ul>${unresolved.map(i=>`<li><strong>${escapeHtml(i.severity.toUpperCase())}:</strong> ${escapeHtml(i.title)}: ${escapeHtml(i.message)}</li>`).join("")}</ul>`:"<p>No unresolved review decisions.</p>"}</section>
-    <section class="report-section" tabindex="0"><h3>Schema and review provenance</h3><p><code>${escapeHtml(SCHEMA_ID)} v${SCHEMA_VERSION}</code>. This is a local IPv4 design artifact. A network owner must review addressing, routing and policy before implementation.</p></section>
+    <div class="report-kpis">${[["Sites",state.sites.length],["VLANs",vlans.length],["WAN links",state.links.length],["Decisions to review",unresolved.length]].map(([label,value])=>`<div class="report-kpi"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("")}</div>
+    <section class="report-section" tabindex="0" role="region" aria-labelledby="report-sites-title"><h3 id="report-sites-title">Site and address plan</h3><table><thead><tr><th scope="col">Site</th><th scope="col">Role</th><th scope="col">Site range</th><th scope="col">VLAN</th><th scope="col">Subnet and gateway</th><th scope="col">DHCP pool</th><th scope="col">Reserved</th><th scope="col">Devices</th></tr></thead><tbody>${vlans.length?vlans.map(({site,vlan:v})=>`<tr><td>${escapeHtml(site.name)}</td><td>${escapeHtml(site.topologyRole)}</td><td><code>${escapeHtml(site.cidr)}</code></td><td>${v.vid} · ${escapeHtml(v.name)}</td><td><code>${escapeHtml(v.cidr)}</code><br><small>${escapeHtml(v.gateway)}</small></td><td>${v.dhcpEnabled?`<code>${escapeHtml(v.dhcpStart)}</code><br><small>to ${escapeHtml(v.dhcpEnd)}</small>`:"Static"}</td><td>${v.reserved}</td><td>${v.devices}</td></tr>`).join(""):`<tr><td colspan="8">No VLANs defined.</td></tr>`}</tbody></table></section>
+    <section class="report-section" tabindex="0" role="region" aria-labelledby="report-wan-title"><h3 id="report-wan-title">WAN and routing intent</h3><p>Link paths describe logical connectivity, not verified circuit independence. Dual paths can share a site WAN dependency.</p><table><thead><tr><th scope="col">Connection</th><th scope="col">Transport</th><th scope="col">Link paths</th><th scope="col">Routing</th><th scope="col">Transit</th><th scope="col">Prefixes and default</th><th scope="col">Notes</th></tr></thead><tbody>${state.links.length?state.links.map(l=>`<tr><td>${escapeHtml(siteName(l.from))} to ${escapeHtml(siteName(l.to))}</td><td>${escapeHtml(linkLabel(l))}</td><td>${l.resilience==="dual"?"Dual logical paths":"Single path"}</td><td>${escapeHtml(l.routingType)}</td><td>${l.transitAllowed===false?"denied":"allowed"}</td><td>${(l.advertisedPrefixes||[]).map(escapeHtml).join(", ")||"Learned dynamically"}${l.defaultRoute?"; default 0.0.0.0/0":""}</td><td>${escapeHtml(l.notes||"Not documented")}</td></tr>`).join(""):`<tr><td colspan="7">No WAN links defined.</td></tr>`}</tbody></table></section>
+    <section class="report-section" tabindex="0" role="region" aria-labelledby="report-breakout-title"><h3 id="report-breakout-title">Breakout, hub assignments and inspection</h3><table><thead><tr><th scope="col">Site</th><th scope="col">Topology role</th><th scope="col">Assigned hub</th><th scope="col">Internet breakout</th><th scope="col">Inspection intent</th></tr></thead><tbody>${breakoutRows||`<tr><td colspan="5">No sites defined.</td></tr>`}</tbody></table></section>
+    <section class="report-section" tabindex="0" role="region" aria-labelledby="report-policy-title"><h3 id="report-policy-title">Traffic policy matrix</h3><table><thead><tr><th scope="col">Source role</th><th scope="col">Destination role</th><th scope="col">Action</th><th scope="col">Rationale</th></tr></thead><tbody>${policyRows||`<tr><td colspan="4">${roles.length?"A single VLAN role has no cross-zone flows to govern.":"No VLAN roles defined."}</td></tr>`}</tbody></table><p>Policy values describe intended trust boundaries. They are not device configuration.</p></section>
+    <section class="report-section"><h3>Assumptions and unresolved decisions</h3>${state.assumptions?.length?`<ul>${state.assumptions.map(a=>`<li>${escapeHtml(a)}</li>`).join("")}</ul>`:"<p>No assumptions documented.</p>"}${unresolved.length?`<ul>${unresolved.map(i=>`<li><strong>${escapeHtml(i.severity.toUpperCase())}:</strong> ${escapeHtml(i.title)}: ${escapeHtml(i.message)}</li>`).join("")}</ul>`:"<p>No unresolved review decisions.</p>"}</section>
+    <section class="report-section"><h3>Schema and review provenance</h3><p><code>${escapeHtml(SCHEMA_ID)} v${SCHEMA_VERSION}</code>. This is a local IPv4 design artifact. A network owner must review addressing, routing and policy before implementation.</p></section>
   </article>`;
 }
 
 function renderProjectLibrary(){
-  const library=loadLibrary(),projects=Object.values(library).sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)));
+  const library=loadLibrary();for(const design of persistence.pendingDocuments())library[design.projectId]=design;
+  const projects=Object.values(library).sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)));
   $("#project-list").innerHTML=projects.length?projects.map(p=>`<article class="project-card ${p.projectId===state.projectId?"current":""}"><div><strong>${escapeHtml(p.name)}</strong><small>${p.sites?.length||0} sites · updated ${new Date(p.updatedAt).toLocaleString()}${p.projectId===state.projectId?" · current":""}</small></div><div class="project-card-actions"><button class="button ghost" data-open-project="${p.projectId}" type="button">Open</button>${p.projectId===state.projectId?"":`<button class="button ghost" data-delete-project="${p.projectId}" type="button">Delete</button>`}</div></article>`).join(""):"<p>No saved designs yet.</p>";
 }
+function designFingerprint(design){
+  const canonical=migrateDesign(design,{strict:false});delete canonical.updatedAt;
+  return JSON.stringify(canonical,(_,value)=>value&&typeof value==="object"&&!Array.isArray(value)?Object.fromEntries(Object.keys(value).sort().map(key=>[key,value[key]])):value);
+}
 function exportLibrary(){
-  const library=loadLibrary();const projects={...library,[state.projectId]:state};
+  const library=loadLibrary(),projects={...library},seen=new Set(Object.values(library).map(designFingerprint));
+  const variants=[state,...persistence.pendingDocuments(),...persistence.recoveries().map(row=>row.document).filter(Boolean)];
+  for(const design of variants){
+    const raw=designFingerprint(design);if(seen.has(raw))continue;seen.add(raw);
+    if(projects[design.projectId]){const copy={...design,projectId:uid(),name:`${design.name} recovery copy`};projects[copy.projectId]=copy}
+    else projects[design.projectId]=design;
+  }
   const blob=new Blob([JSON.stringify({format:"network-planner-library.v1",projects},null,2)],{type:"application/json"});
   const link=document.createElement("a");link.href=URL.createObjectURL(blob);link.download="network-planner-all-designs.json";link.click();setTimeout(()=>URL.revokeObjectURL(link.href),1000);
-  showToast("All designs backed up. The file contains your complete local library.");
+  showToast(legacyRows.length?"Current designs backed up. Previous-version originals remain available separately.":"All designs backed up. The file contains your complete local library.");
 }
 $("#export-library").addEventListener("click",exportLibrary);
 function openProjects(){saveState();renderProjectLibrary();$("#projects-dialog").showModal()}
@@ -686,8 +818,11 @@ document.addEventListener("click",e=>{
   if(e.target.closest("#duplicate-project"))return duplicateProject();
   if(e.target.closest("#new-project"))return newProject();
   if(e.target.closest("#print-report")){buildView("report");return window.print()}
-  const openProject=e.target.closest("[data-open-project]");if(openProject){if(conflictProjectId===state.projectId)return showConflict();const project=loadLibrary()[openProject.dataset.openProject];if(project){state=reviveDesign(project);selected=null;undoStack=[];redoStack=[];nudgeBurst={siteId:null,at:0};expandedSites.clear();saveState();$("#projects-dialog").close();enterWorkspace();render();showToast(`${state.name} opened`)}return}
-  const deleteProject=e.target.closest("[data-delete-project]");if(deleteProject&&confirm("Delete this locally saved design?")){const library=loadLibrary();delete library[deleteProject.dataset.deleteProject];storageSet(LIBRARY_KEY,JSON.stringify(library));renderProjectLibrary();showToast("Design deleted");return}
+  const openProject=e.target.closest("[data-open-project]");if(openProject){if(conflictProjectId===state.projectId)return showConflict();saveState();const project=persistence.pendingDocument(openProject.dataset.openProject)||loadLibrary()[openProject.dataset.openProject];if(project){if(!persistence.pendingDocument(project.projectId))persistence.observe(project.projectId,JSON.stringify(project));state=reviveDesign(project);selected=null;undoStack=[];redoStack=[];nudgeBurst={siteId:null,at:0};expandedSites.clear();saveState();$("#projects-dialog").close();enterWorkspace();render();showToast(`${state.name} opened`)}return}
+  const deleteProject=e.target.closest("[data-delete-project]");if(deleteProject&&confirm("Delete this locally saved design?")){
+    const id=deleteProject.dataset.deleteProject,expected=JSON.stringify(loadLibrary()[id]??null);
+    void persistence.mutate(library=>{if(JSON.stringify(library[id]??null)!==expected)throw new Error("This design changed in another tab. Review it before deleting.");delete library[id]}).then(()=>{renderProjectLibrary();showToast("Design deleted")}).catch(error=>showToast(error.message));return;
+  }
   const recommendVlan=e.target.closest("[data-recommend-vlan]");if(recommendVlan)return openRecommendDialog("vlan",recommendVlan.dataset.recommendVlan);
   const recommendKind=e.target.closest("[data-recommend-kind]");if(recommendKind)return setRecommendationKind(recommendKind.dataset.recommendKind);
   if(e.target.closest("#refresh-recommendation"))return buildRecommendation();
@@ -781,10 +916,14 @@ $("#file-input").addEventListener("change",async e=>{
     if(bundle?.format==="network-planner-library.v1"){
       if(!bundle.projects||typeof bundle.projects!=="object"||Array.isArray(bundle.projects))throw new Error("Invalid library backup");
       const imported=Object.values(bundle.projects).map(raw=>migrateDesign(raw,{strict:true}));
-      const library=loadLibrary();let restored=0;
-      for(let design of imported){if(library[design.projectId])design={...design,projectId:uid(),name:`${design.name} recovered`};library[design.projectId]=design;restored++}
-      if(!storageSet(LIBRARY_KEY,JSON.stringify(library)))throw new Error(storageIssue);
-      showToast(`${restored} designs restored; existing designs kept`);e.target.value="";return;
+      const library=loadLibrary();
+      const results=await Promise.all(imported.map(design=>{
+        if(library[design.projectId]||persistence.pendingDocument(design.projectId))design={...design,projectId:uid(),name:`${design.name} recovered`};
+        library[design.projectId]=design;
+        persistence.observe(design.projectId,"null");return persistence.enqueue(design);
+      }));
+      if(results.some(result=>!result.ok))throw new Error("Some designs could not be restored. Review the retained recovery copies.");
+      showToast(`${results.length} designs restored; existing designs kept`);e.target.value="";return;
     }
     if(file.size>IMPORT_MAX_BYTES)throw new Error("Single designs are limited to 10 MB; library backups to 64 MB.");
     const isCsv=file.name.toLowerCase().endsWith(".csv"),raw=isCsv?designFromCsv(text):JSON.parse(text.replace(/^\uFEFF/,"")),imported=isCsv?raw:migrateDesign(raw,{strict:true});pushHistory();state=imported;state.mode=state.mode||"imported";selected=null;expandedSites.clear();saveState();enterWorkspace();render();showToast(`${isCsv?"CSV":"Design"} imported and validated`)}
@@ -911,6 +1050,15 @@ document.addEventListener("visibilitychange",()=>{if(document.visibilityState===
 // Storage has no merge: when two tabs hold one design, the next save from
 // either side silently destroys the other's work. Surface the conflict.
 window.addEventListener("storage",e=>{
+  if(isLegacyKey(e.key)){void refreshLegacy();return}
+  if(e.key===null)void refreshLegacy();
+  if(e.key?.startsWith(DRAFT_PREFIX)){persistence.notifyRecovery();return}
+  if(e.key===LIBRARY_KEY||e.key===null){
+    void refreshLegacy();
+    const snapshot=JSON.stringify(loadLibrary()[state.projectId]??null);
+    if(savedProjectSnapshots.has(state.projectId)&&savedProjectSnapshots.get(state.projectId)!==snapshot)showConflict();
+    return;
+  }
   if(e.key!==STORAGE_KEY||!e.newValue)return;
   let incoming=null;try{incoming=JSON.parse(e.newValue)}catch{}
   if(incoming&&incoming.projectId===state.projectId&&String(incoming.updatedAt)!==String(state.updatedAt))showConflict();
@@ -923,4 +1071,7 @@ function escapeHtml(value){return String(value??"").replace(/[&<>"']/g,c=>({"&":
 function roleClass(role){return ENUMS.vlanRoles.includes(role)?`role-${role}`:"role-other"}
 
 activateView("topology");enterWorkspace();render();
+if(initialConflict)showConflict();
+persistence.notifyRecovery();
+void refreshLegacy();
 if(storageIssue) showToast(storageIssue);

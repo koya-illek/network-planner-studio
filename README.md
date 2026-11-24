@@ -127,3 +127,25 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for fixes and feature proposals, or
 MIT © Koya Illek. See [LICENSE](LICENSE).
 
 Live service: [network.illek.ie](https://network.illek.ie).
+
+## Local saving and previous-version designs
+
+The current browser-storage generation uses separate current-design, library,
+recovery-draft and writer-lock namespaces from the pre-locking app. An old tab
+therefore cannot overwrite a current-generation save. Design JSON/CSV schema
+versions are unchanged; this is storage isolation, not a new network model.
+
+When older data exists, **Previous-version designs** offers an explicit import
+or download. Importing creates a separate, content-addressed project copy;
+repeating the same import opens that copy without overwriting edits made here.
+Later changes in an old tab appear as new importable snapshots. No legacy
+library, current design or unfinished draft is automatically changed or deleted.
+The current all-designs backup contains the current generation; older originals
+remain separately downloadable until imported. A rollback still sees the older
+originals, not edits made only in this generation—export new work before rollback.
+
+Web Locks coordinate updated writers. Unsupported browsers retain recovery/export
+paths instead of silently making unlocked library writes. Browser-storage
+acknowledgement is not a filesystem-flush guarantee: ordinary tab-close recovery
+is tested, but immediate whole-browser termination can lose the newest buffered
+localStorage write. Exported copies remain the independent backup mechanism.
