@@ -248,3 +248,26 @@ input[aria-invalid="true"],select[aria-invalid="true"],textarea[aria-invalid="tr
 
 /* Keep the mobile inspector below navigation when enlarged text grows the header. */
 @media(max-width:1050px){.view#topology-view{position:relative}.inspector{position:absolute;top:0}}
+
+/* Content-sized diagram controls and data remain readable with enlarged text. */
+.canvas-toolbar{flex-wrap:wrap}
+.canvas-meta{flex-basis:180px}
+.canvas-meta>span{overflow-wrap:anywhere}
+.mode-group{min-inline-size:0;max-inline-size:100%}
+.zoom-controls{margin-inline-start:auto}
+.node-copy{flex:1;overflow-wrap:anywhere}
+.node-copy strong{font-size:.75rem}
+.expanded-copy .node-copy strong{white-space:normal;overflow:visible;text-overflow:clip}
+.node-icon{flex:0 0 auto;min-inline-size:34px;width:max-content;min-block-size:34px;height:auto}
+.node-layer[data-measuring] .node-address{display:inline-block;white-space:nowrap}
+.site-row strong,.site-row small{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
+.vlan-row{flex-wrap:wrap}
+.vlan-row span:nth-child(2){min-inline-size:0;overflow-wrap:anywhere}
+.vlan-row code{overflow-wrap:anywhere;max-inline-size:100%}
+.vlan-dot{flex:0 0 7px}
+
+/* Hidden drawers must not create an off-screen horizontal scroll area. */
+@media(max-width:1050px){
+  .inspector{transform:none}
+  .inspector:not(.open){opacity:0;pointer-events:none}
+}
