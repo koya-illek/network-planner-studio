@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { reviewDesignIssues, designScore, defaultFlowPolicy, migrateDesign } from "../public/network-core.js";
+import { reviewDesignIssues, designScore, defaultFlowPolicy, migrateDesign, exampleDesign } from "../public/network-core.js";
 
 const base = (overrides = {}) => ({
   schema: "network-planner-studio/design",
@@ -243,4 +243,26 @@ test("reviewing a multi-thousand-site import stays fast and keeps isolation find
   assert.deepEqual(isolated.map(i => i.siteId), Array.from({ length: count - linked }, (_, k) => `s${linked + k}`));
   assert.ok(Number.isFinite(designScore(issues)));
   assert.ok(elapsed < 1500, `review must not stall on large imports (took ${elapsed}ms)`);
+});
+
+
+test("the example branch link matches its single WAN dependency", () => {
+  const design = exampleDesign();
+  assert.equal(design.links.find(l => l.id === "link-hq-branch").resilience, "single");
+  const issues = reviewDesignIssues(design);
+  assert.ok(issues.some(i => i.title === "Single WAN dependency" && i.siteId === "branch"));
+  assert.ok(!issues.some(i => i.title === "Dual paths share a WAN dependency"));
+});
+
+test("dual VPN paths warn about single access circuits without rejecting design intent", () => {
+  const design = base({sites: [site(), site({id: "branch", name: "Branch", cidr: "10.30.0.0/16", wan: "dual"})], links: [link({resilience: "dual"})]});
+  const risks = reviewDesignIssues(design).filter(i => i.title === "Dual paths share a WAN dependency");
+  assert.equal(risks.length, 1);
+  assert.equal(risks[0].siteId, "hq");
+  assert.match(risks[0].message, /HQ to Branch.*single WAN/);
+  design.sites[0].wan = "dual";
+  assert.ok(!reviewDesignIssues(design).some(i => i.title === "Dual paths share a WAN dependency"));
+  design.sites[0].wan = "single";
+  design.links[0].type = "private";
+  assert.ok(!reviewDesignIssues(design).some(i => i.title === "Dual paths share a WAN dependency"), "private WAN paths do not imply internet access dependence");
 });

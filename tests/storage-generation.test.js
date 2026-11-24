@@ -1,0 +1,31 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
+import {createLegacyBridge,STORAGE_KEY,LIBRARY_KEY,DRAFT_PREFIX,LEGACY_ACTIVE,LEGACY_LIBRARY,LEGACY_DRAFT_PREFIX} from '../public/storage-generation.js';
+import {createPersistence} from '../public/persistence.js';
+import {migrateDesign,exampleDesign} from '../public/network-core.js';
+function fixture(){const values=new Map(),storage={get length(){return values.size},key:i=>[...values.keys()][i],getItem:k=>values.get(k)??null,setItem:(k,v)=>values.set(k,v),removeItem:k=>values.delete(k)};let serial=0;
+const p=createPersistence({storage,locks:{request:(_,run)=>Promise.resolve().then(run)},readLibrary:()=>JSON.parse(storage.getItem(LIBRARY_KEY)||'{}'),writeLibrary:l=>{storage.setItem(LIBRARY_KEY,JSON.stringify(l));return true},writeActive:()=>true,validate:migrateDesign,currentId:()=>null,id:()=>String(++serial)});
+const bridge=createLegacyBridge({storage,persistence:p,validate:migrateDesign,hash:async text=>createHash('sha256').update(text).digest('hex')});return{storage,values,p,bridge,doc:exampleDesign()};}
+test('generation keys isolate all mutable current slots from legacy clients',()=>{assert.notEqual(STORAGE_KEY,LEGACY_ACTIVE);assert.notEqual(LIBRARY_KEY,LEGACY_LIBRARY);assert.notEqual(DRAFT_PREFIX,LEGACY_DRAFT_PREFIX)});
+test('library/current identical variants deduplicate and changing only time does not create another import',async()=>{const f=fixture();f.storage.setItem(LEGACY_LIBRARY,JSON.stringify({[f.doc.projectId]:f.doc}));f.storage.setItem(LEGACY_ACTIVE,JSON.stringify({...f.doc,updatedAt:'later'}));const rows=await f.bridge.rows();assert.equal(rows.length,1);const before=[...f.values];await f.bridge.importCopy(rows[0]);assert.deepEqual([...f.values].filter(([k])=>k===LEGACY_LIBRARY||k===LEGACY_ACTIVE),before);const copy=JSON.parse(f.storage.getItem(LIBRARY_KEY))[rows[0].targetId];assert.equal(copy.sites.length,f.doc.sites.length);assert.deepEqual(copy.links,f.doc.links);assert.equal((await f.bridge.rows())[0].targetId,rows[0].targetId)});
+test('later legacy changes remain distinct and repeated imports never replace an edited copy',async()=>{const f=fixture();f.storage.setItem(LEGACY_ACTIVE,JSON.stringify(f.doc));const [row]=await f.bridge.rows();await f.bridge.importCopy(row);const library=JSON.parse(f.storage.getItem(LIBRARY_KEY));library[row.targetId].name='Edited here';f.storage.setItem(LIBRARY_KEY,JSON.stringify(library));await f.bridge.importCopy(row);assert.equal(JSON.parse(f.storage.getItem(LIBRARY_KEY))[row.targetId].name,'Edited here');f.storage.setItem(LEGACY_ACTIVE,JSON.stringify({...f.doc,name:'Later old edit'}));const [later]=await f.bridge.rows();assert.notEqual(later.targetId,row.targetId);await f.bridge.importCopy(later);assert.equal(Object.keys(JSON.parse(f.storage.getItem(LIBRARY_KEY))).length,2)});
+test('legacy malformed data remains raw-downloadable and read-only',async()=>{const f=fixture();f.storage.setItem(LEGACY_LIBRARY,'{broken');const rows=await f.bridge.rows();assert.equal(rows[0].raw,'{broken');assert.ok(rows[0].error);await assert.rejects(f.bridge.importCopy(rows[0]));assert.equal(f.storage.getItem(LEGACY_LIBRARY),'{broken')});
+test('unfinished legacy journals remain importable without being removed',async()=>{const f=fixture(),key=LEGACY_DRAFT_PREFIX+'old.project';f.storage.setItem(key,JSON.stringify({format:'network-planner-pending.v1',document:f.doc}));const [row]=await f.bridge.rows();await f.bridge.importCopy(row);assert.ok(f.storage.getItem(key));assert.equal(row.label,'Unfinished previous-version save')});
+test('normalisation-generated ids cannot cause repeated unchanged legacy snapshots to multiply',async()=>{const f=fixture();const raw={...f.doc,projectId:'invalid id'};f.storage.setItem(LEGACY_ACTIVE,JSON.stringify(raw));const [first]=await f.bridge.rows(),[second]=await f.bridge.rows();assert.equal(first.targetId,second.targetId);await f.bridge.importCopy(first);await f.bridge.importCopy(second);assert.equal(Object.keys(JSON.parse(f.storage.getItem(LIBRARY_KEY))).length,1)});
+test('previous-version quarantined originals stay visible and raw-downloadable after reseeding',async()=>{
+ const f=fixture(),key=LEGACY_LIBRARY+'.unreadable';f.storage.setItem(LEGACY_LIBRARY,'{}');f.storage.setItem(key,'{previous damaged original');const before=[...f.values];const rows=await f.bridge.rows();
+ assert.equal(rows.length,1);assert.equal(rows[0].raw,'{previous damaged original');assert.ok(rows[0].error);assert.deepEqual([...f.values],before);
+});
+test('normalised legacy identifiers retain network connections and source bytes',async()=>{
+ const f=fixture(),source=structuredClone(f.doc),oldId=source.sites[0].id;source.sites[0].id='invalid site identifier';source.projectId='invalid project identifier';
+ for(const site of source.sites)if(site.hubId===oldId)site.hubId=source.sites[0].id;
+ for(const link of source.links){if(link.from===oldId)link.from=source.sites[0].id;if(link.to===oldId)link.to=source.sites[0].id}
+ if(source.policies.secondaryHubId===oldId)source.policies.secondaryHubId=source.sites[0].id;
+ const raw=JSON.stringify(source);f.storage.setItem(LEGACY_ACTIVE,raw);const [row]=await f.bridge.rows();assert.ok(row.document);await f.bridge.importCopy(row);
+ const copy=JSON.parse(f.storage.getItem(LIBRARY_KEY))[row.targetId];assert.equal(copy.sites.length,source.sites.length);assert.equal(copy.links.length,source.links.length);
+ const endpoints=doc=>doc.links.map(link=>[doc.sites.find(site=>site.id===link.from)?.name,doc.sites.find(site=>site.id===link.to)?.name]);assert.deepEqual(endpoints(copy),endpoints(source));assert.equal(f.storage.getItem(LEGACY_ACTIVE),raw);
+});
+test('colliding legacy site identifiers are raw-recoverable, never silently merged into a healthy copy',async()=>{
+ const f=fixture(),source=structuredClone(f.doc);source.sites[1].id=source.sites[0].id;const raw=JSON.stringify(source);f.storage.setItem(LEGACY_ACTIVE,raw);const [row]=await f.bridge.rows();assert.ok(row.error);assert.equal(row.document,undefined);assert.equal(row.raw,raw);await assert.rejects(f.bridge.importCopy(row));assert.equal(f.storage.getItem(LIBRARY_KEY),null);
+});
