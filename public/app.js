@@ -649,6 +649,39 @@ function duplicateProject(){
 }
 function newProject(){if(conflictProjectId===state.projectId)return showConflict();state=blankState();state.mode="new";selected=null;undoStack=[];redoStack=[];nudgeBurst={siteId:null,at:0};expandedSites.clear();saveState();$("#projects-dialog").close();enterWorkspace();render();openSiteDialog()}
 
+// Associate submit-time business errors with their fields without changing native constraints.
+const formValidation = new Map();
+function clearFormError(form){
+  const error=$(".form-error",form),fields=formValidation.get(form)||[];
+  for(const field of fields){
+    field.setAttribute("aria-invalid","false");
+    const descriptions=(field.getAttribute("aria-describedby")||"").split(/\s+/).filter(id=>id&&id!==error.id);
+    if(descriptions.length)field.setAttribute("aria-describedby",descriptions.join(" "));
+    else field.removeAttribute("aria-describedby");
+  }
+  error.textContent="";formValidation.delete(form);
+}
+function showFormError(form,error,fieldNames){
+  clearFormError(form);
+  const summary=$(".form-error",form);
+  const path=error.errors?.[0]?.path?.split(".").pop();
+  const names=path&&form.elements.namedItem(path)?[path]:fieldNames;
+  const fields=names.map(name=>form.elements.namedItem(name)).filter(field=>field instanceof HTMLElement&&!field.matches(":disabled,[type=hidden]")&&field.getClientRects().length&&getComputedStyle(field).visibility!=="hidden");
+  for(const field of fields){
+    field.setAttribute("aria-invalid","true");
+    const descriptions=new Set((field.getAttribute("aria-describedby")||"").split(/\s+/).filter(Boolean));
+    descriptions.add(summary.id);field.setAttribute("aria-describedby",[...descriptions].join(" "));
+  }
+  summary.textContent=error.message;formValidation.set(form,fields);
+  // Cross-field failures belong to the summary rather than an arbitrarily chosen field.
+  (fields.length===1?fields[0]:summary).focus();
+}
+for(const form of [$("#site-form"),$("#vlan-form")]){
+  form.addEventListener("input",()=>{if(formValidation.has(form))clearFormError(form)});
+  form.addEventListener("change",()=>{if(formValidation.has(form))clearFormError(form)});
+  form.addEventListener("reset",()=>clearFormError(form));
+}
+
 function openSiteDialog(siteId=null){
   editingSiteId=siteId;const form=$("#site-form");form.reset();form.elements.devices.value=50;
   const growth=form.elements.growth;growth.querySelector("option[data-dynamic-growth]")?.remove();growth.value=30;
@@ -792,25 +825,28 @@ $("#site-form").addEventListener("submit",e=>{
     if(editingSiteId){const site=state.sites.find(s=>s.id===editingSiteId),canonical=createSite({...site,name,type:fd.get("type"),devices,cidr,wan:fd.get("wan"),growth,topologyRole:fd.get("topologyRole"),internetBreakout:fd.get("internetBreakout"),notes:fd.get("notes").trim()});Object.assign(site,canonical,{id:site.id,hubId:site.hubId,x:site.x,y:site.y});selected={type:"site",id:site.id};showToast("Site updated")}
     else{const index=state.sites.length,stateSite=createSite({id:uid(),name,type:fd.get("type"),devices,cidr,wan:fd.get("wan"),growth,topologyRole:fd.get("topologyRole"),hubId:null,internetBreakout:fd.get("internetBreakout"),notes:fd.get("notes").trim(),x:12+(index%3)*31,y:18+Math.floor(index/3)*34,vlans:[]});state.sites.push(stateSite);selected={type:"site",id:stateSite.id};showToast("Site added. Add its existing or proposed VLANs next.")}
     editingSiteId=null;e.currentTarget.closest("dialog").close();touch();
-  }catch(err){$("#site-form-error").textContent=err.message}
+  }catch(err){showFormError(e.currentTarget,err,["cidr"])}
 });
 $("#vlan-form").addEventListener("submit",e=>{
-  e.preventDefault();const existing=editingVlanId&&findVlan(editingVlanId),site=existing?.site||state.sites.find(s=>s.id===e.currentTarget.elements.siteId.value);if(!site)return $("#vlan-form-error").textContent="The selected site no longer exists";const fd=new FormData(e.currentTarget);
-  const devices=+fd.get("devices"),vid=+fd.get("vid"),reserved=+fd.get("reserved");let cidr=fd.get("cidr").trim();
+  e.preventDefault();const existing=editingVlanId&&findVlan(editingVlanId),site=existing?.site||state.sites.find(s=>s.id===e.currentTarget.elements.siteId.value);if(!site)return showFormError(e.currentTarget,new Error("The selected site no longer exists"),[]);const fd=new FormData(e.currentTarget);
+  const devices=+fd.get("devices"),vid=+fd.get("vid"),reserved=+fd.get("reserved");let cidr=fd.get("cidr").trim(),errorFields=["vid"];
   try{
     const role=fd.get("role");if(site.vlans.some(v=>v.id!==editingVlanId&&v.vid===vid))throw new Error(`VLAN ${vid} is already used at ${site.name}`);
+    errorFields=["cidr"];
     if(!cidr)cidr=nextSubnet(site.cidr,prefixForDevices(devices,site.growth,reserved,{transit:role==="transit"}),site.vlans.filter(v=>v.id!==editingVlanId).map(v=>v.cidr));
     cidr=parseCidr(cidr,{allow31:role==="transit"}).cidr;if(!contains(site.cidr,cidr))throw new Error(`${cidr} is outside the site's ${site.cidr} allocation`);
     if(site.vlans.some(v=>v.id!==editingVlanId&&rangesOverlap(cidr,v.cidr)))throw new Error("This subnet overlaps another VLAN at the site");
     const dhcpEnabled=fd.get("dhcpEnabled")==="true",gateway=fd.get("gateway").trim()||firstUsable(cidr),automaticPool=defaultDhcpPool(cidr,reserved,{gateway}),dhcpStart=fd.get("dhcpStart").trim()||automaticPool.start,dhcpEnd=fd.get("dhcpEnd").trim()||automaticPool.end;
+    errorFields=["gateway"];
     if(!validateGateway(gateway,cidr,{transit:role==="transit"}))throw new Error("Gateway must be a usable host inside the VLAN subnet");
     const poolValidation=validateDhcpPool(cidr,gateway,reserved,{enabled:dhcpEnabled,start:dhcpStart,end:dhcpEnd});
+    errorFields=["dhcpStart","dhcpEnd"];
     if(!poolValidation.valid)throw new Error(poolValidation.errors[0]);
     pushHistory();
     const values=createVlan({id:editingVlanId||uid(),name:fd.get("name").trim(),vid,role,devices,cidr,gateway,dhcpEnabled,reserved,dhcpStart:dhcpEnabled?dhcpStart:"",dhcpEnd:dhcpEnabled?dhcpEnd:"",notes:fd.get("notes").trim(),siteCidr:site.cidr});
     let v;if(editingVlanId){v=existing.vlan;Object.assign(v,values);showToast(`${v.name} updated`)}else{v=values;site.vlans.push(v);showToast(`Added ${v.name} as ${v.cidr}`)}
     selected={type:"vlan",id:v.id};editingVlanId=null;e.currentTarget.closest("dialog").close();touch();
-  }catch(err){$("#vlan-form-error").textContent=err.message}
+  }catch(err){showFormError(e.currentTarget,err,errorFields)}
 });
 $("#connect-form").addEventListener("submit",e=>{
   e.preventDefault();const fd=new FormData(e.currentTarget),from=fd.get("from"),to=fd.get("to");

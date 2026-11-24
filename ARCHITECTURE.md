@@ -64,6 +64,19 @@ No project-data arrow returns to Cloudflare. Designs are processed and stored lo
 
 The browser UI calls the core functions directly, so a design is reviewed with the same engine that validates imports.
 
+## Form sizing and error recovery, 2026-11-24
+
+Site and VLAN forms keep native required and numeric constraints. Business-rule
+failures focus the affected field, associate the message with `aria-describedby`,
+and mark it with `aria-invalid`. Cross-field DHCP failures focus the error summary
+and describe both pool bounds. Editing or reopening clears stale custom error
+state without discarding entered data or permanent field hints.
+
+Editable controls inherit typography with a `1rem` minimum, including textareas.
+Form columns and actions can reflow with enlarged browser text. On narrow screens,
+the inspector is positioned within the topology view, not at a fixed assumed
+header offset, so a taller header cannot make it cover view navigation.
+
 ## Canonical data model
 
 The root schema identifier is `network-planner-studio/design`, version 3. The design contains:
