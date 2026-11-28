@@ -13,7 +13,7 @@
     "deploy": "node scripts/deploy.mjs"
   },
   "devDependencies": {
-    "@axe-core/playwright": "^4.14.0",
+    "@axe-core/playwright": "^4.14.1",
     "@playwright/test": "^1.65.1",
     "wrangler": "^4.166.0"
   },
